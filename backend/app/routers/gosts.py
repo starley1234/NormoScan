@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models.gost import Gost
@@ -68,6 +68,20 @@ def search(inp: dict, db: Session=Depends(get_db), user: User=Depends(get_curren
 @router.post("/ask")
 def ask(inp: dict, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
     return search_gost(inp.get("query",""), top_k=inp.get("top_k",3))
+
+@router.get("/autocomplete")
+def autocomplete(q: str = Query(..., description="Префикс ГОСТа"), limit: int=5, user: User=Depends(get_current_user)):
+    # Auth required, but open for viewer+
+    from ..services.rag_text import text_rag
+    return {"query": q, "suggestions": text_rag.autocomplete(q, limit=limit)}
+
+@router.get("/diff")
+def diff_gosts(old_id: int, new_id: int, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    from ..services.diff import gost_diff_by_id
+    res = gost_diff_by_id(db, old_id, new_id)
+    if not res:
+        raise HTTPException(404, "GOST not found")
+    return res
 
 @router.post("/{gost_id}/obsolete")
 def set_obsolete(gost_id:int, superseded_by: str=None, db: Session=Depends(get_db), user: User=Depends(get_current_user)):

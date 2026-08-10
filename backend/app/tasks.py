@@ -98,7 +98,15 @@ def _process_check_logic(check_id: int):
                     visual_hints.append(hint)
             visual_hint = visual_hints[0] if visual_hints else None
 
-            vlm_out = vlm_service.analyze_page(img_path, ocr_text, text_hits=text_hits, visual_hint=visual_hint, page_number=page_num, summary_prev=summary_prev)
+            # Extract visual sim for calibration
+            vis_sim=None
+            if visual_hint:
+                import re
+                m=re.search(r"(\d+)%", visual_hint)
+                if m:
+                    try: vis_sim=int(m.group(1))/100
+                    except: pass
+            vlm_out = vlm_service.analyze_page(img_path, ocr_text, text_hits=text_hits, visual_hint=visual_hint, page_number=page_num, summary_prev=summary_prev, ocr_confidence=ocr_conf, visual_sim=vis_sim)
             summary_prev = vlm_out.get("summary", summary_prev)
 
             # Save page result

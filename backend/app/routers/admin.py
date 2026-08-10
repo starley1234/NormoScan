@@ -173,3 +173,42 @@ def activate_schema(schema_id:int, db: Session=Depends(get_db), user: User=Depen
     s.is_active=True
     db.commit()
     return {"status":"activated","id":schema_id}
+
+# Retention & Backup
+@router.post("/retention/run", summary="Запустить retention (удалить PDF старше N дней, оставить JSON)")
+def run_retention(days: int=90, trash_days: int=30, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    from ..services.retention import run_retention as do_retention
+    res = do_retention(db, days=days, trash_days=trash_days)
+    return res
+
+@router.get("/trash", summary="Корзина (trashed checks)")
+def list_trash(db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role not in ("admin","normocontroller"):
+        raise HTTPException(403, "Forbidden")
+    from ..services.retention import list_trash
+    items = list_trash(db)
+    return {"items": [{"id":c.id,"filename":c.filename,"status":c.status,"created_at":c.created_at,"filepath":c.filepath} for c in items]}
+
+@router.post("/trash/{check_id}/restore", summary="Восстановить из корзины")
+def restore_trash(check_id: int, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    from ..services.retention import restore_check
+    c = restore_check(db, check_id)
+    if not c:
+        raise HTTPException(404, "Not found or not trashed")
+    return {"status":"restored","id":c.id}
+
+@router.post("/backup", summary="Бэкап в 1 клик (tar.gz)")
+def backup(db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    from ..services.retention import create_backup
+    from fastapi.responses import FileResponse
+    import os
+    path = create_backup(db)
+    if not os.path.exists(path):
+        raise HTTPException(500, "Backup failed")
+    return FileResponse(path, filename=os.path.basename(path), media_type="application/gzip")

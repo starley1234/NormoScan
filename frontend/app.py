@@ -8,6 +8,22 @@ API = os.getenv("API_URL", "http://localhost:8000")
 
 st.set_page_config(page_title="НормоСкан", page_icon="📐", layout="wide", initial_sidebar_state="expanded")
 
+# Горячие клавиши: Space следующий лист, 1/2/3 👍/👎/fix, Ctrl+Enter спросить
+st.markdown("""
+<script>
+document.addEventListener('keydown', (e)=>{
+  if(e.target.tagName==='INPUT' && e.key!=='Enter') return;
+  if(e.code==='Space' && !e.ctrlKey){ e.preventDefault(); window.dispatchEvent(new CustomEvent('hotkey', {detail:'next'})); }
+  if(e.key==='1' && !e.ctrlKey){ document.querySelector('[data-testid=\"like\"]')?.click(); }
+  if(e.key==='2'){ document.querySelector('[data-testid=\"dislike\"]')?.click(); }
+  if(e.key==='3'){ document.querySelector('[data-testid=\"fix\"]')?.click(); }
+  if(e.ctrlKey && e.key==='Enter'){ document.querySelector('[data-testid=\"ask\"]')?.click(); }
+});
+</script>
+<style>kbd{background:#eee;border:1px solid #ccc;padding:2px 6px;border-radius:4px;font-size:0.85em}</style>
+""", unsafe_allow_html=True)
+st.caption("Горячие клавиши: <kbd>Space</kbd> след.лист <kbd>1</kbd>👍 <kbd>2</kbd>👎 <kbd>3</kbd>fix <kbd>Ctrl+Enter</kbd> спросить")
+
 if "token" not in st.session_state:
     st.session_state.token=None
     st.session_state.role=None
@@ -299,9 +315,34 @@ elif page=="ГОСТы":
                     st.json(rr.json() if rr else {})
         else:
             st.info("ГОСТов нет")
+    # Diff ГОСТов
+    with st.expander("🔀 Diff ГОСТов (сравнение версий)"):
+        c1,c2=st.columns(2)
+        with c1: old_id=st.number_input("Старый ID", min_value=0, step=1, key="old_gost")
+        with c2: new_id=st.number_input("Новый ID", min_value=0, step=1, key="new_gost")
+        if st.button("Сравнить"):
+            r=api_get(f"/api/gosts/diff?old_id={int(old_id)}&new_id={int(new_id)}")
+            if r and r.status_code==200:
+                j=r.json()
+                st.write(f"Добавлено: {j.get('added')} · Удалено: {j.get('removed')}")
+                st.code("\n".join(j.get("diff",[])[:200]), language="diff")
+                if j.get("html"):
+                    st.components.v1.html(j["html"], height=300, scrolling=True)
+            else:
+                st.error(r.text if r else "Ошибка")
     st.divider()
-    st.subheader("Поиск / Вопрос по ГОСТам")
+    st.subheader("Поиск / Вопрос по ГОСТам — Hybrid RAG + cross-encoder re-rank")
     q=st.text_input("Вопрос", placeholder="Какие требования к основной надписи по ГОСТ 2.104?")
+    # Autocomplete
+    if len(q.strip())>=2:
+        r_ac=api_get(f"/api/gosts/autocomplete?q={q}&limit=5")
+        if r_ac and r_ac.status_code==200:
+            sug=r_ac.json().get("suggestions",[])
+            if sug:
+                st.caption("Автодополнение: " + " · ".join(sug))
+                sel=st.selectbox("Выбрать подсказку", [""]+sug, key="ac_sel")
+                if sel:
+                    q=sel
     topk=st.slider("top_k",1,10,3)
     if st.button("Искать"):
         r=api_post("/api/gosts/search", json={"query":q,"top_k":topk})
@@ -480,6 +521,30 @@ elif page=="Админка":
             if r and r.status_code==200:
                 st.subheader("Dead letters")
                 st.dataframe(pd.DataFrame(r.json()["items"]), use_container_width=True)
+        st.divider()
+        st.subheader("🗃️ Retention + Корзина + Бэкап (1 клик)")
+        c1,c2,c3=st.columns(3)
+        with c1:
+            days=st.number_input("Дней до корзины", min_value=1, value=90)
+            trash_days=st.number_input("Дней в корзине", min_value=1, value=30)
+            if st.button("Запустить retention"):
+                rr=api_post(f"/api/admin/retention/run?days={int(days)}&trash_days={int(trash_days)}", json={})
+                st.json(rr.json() if rr else {})
+        with c2:
+            if st.button("Показать корзину"):
+                rr=api_get("/api/admin/trash")
+                if rr: st.json(rr.json())
+            rid=st.number_input("ID из корзины для восстановления", min_value=0, step=1)
+            if st.button("Восстановить"):
+                rr=api_post(f"/api/admin/trash/{int(rid)}/restore", json={})
+                st.json(rr.json() if rr else {})
+        with c3:
+            if st.button("📦 Создать бэкап"):
+                rr=requests.post(f"{API}/api/admin/backup", headers=auth_header())
+                if rr.status_code==200:
+                    st.download_button("Скачать бэкап", data=rr.content, file_name="normoscan_backup.tar.gz", mime="application/gzip")
+                else:
+                    st.error(rr.text)
     with tab3:
         r=api_get("/api/admin/users")
         if r and r.status_code==200:
