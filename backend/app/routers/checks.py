@@ -1,18 +1,23 @@
-import os, shutil, uuid, hashlib, json, time, asyncio
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query, Request
+import hashlib
+import json
+import os
+import time
+import uuid
+from datetime import datetime, timedelta
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from sqlalchemy import or_
+from sqlalchemy.orm import Session
+
+from ..config import settings
 from ..db import get_db
-from ..models.check import Check, PageResult, Feedback
+from ..models.check import Check, Feedback, PageResult
 from ..models.user import User
 from ..security import get_current_user, has_permission
-from ..config import settings
-from ..tasks import enqueue_check, process_check_sync
 from ..services.analytics import export_knowledge_base, search_knowledge_base
-from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime, timedelta
+from ..tasks import enqueue_check, process_check_sync
 
 router = APIRouter(prefix="/api/checks", tags=["checks"])
 
@@ -42,12 +47,12 @@ def upload_check(file: UploadFile = File(...), priority: int=5, db: Session=Depe
     db.add(check); db.commit(); db.refresh(check)
     try:
         enqueue_check(check.id, priority=priority)
-    except Exception as e:
+    except Exception:
         process_check_sync(check.id)
     return {"check_id": check.id, "status": check.status, "filename": file.filename, "file_hash": fhash}
 
 @router.get("/", summary="Список проверок (реестр)")
-def list_checks(skip: int=0, limit: int=20, status: Optional[str]=None, q: Optional[str]=None, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+def list_checks(skip: int=0, limit: int=20, status: str | None=None, q: str | None=None, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
     query = db.query(Check).order_by(Check.created_at.desc())
     if status: query = query.filter(Check.status==status)
     if q:

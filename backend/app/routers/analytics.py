@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+
 from ..db import get_db
+from ..models.check import Feedback
 from ..models.user import User
 from ..security import get_current_user
 from ..services.analytics import analytics_summary, generate_llm_report, search_knowledge_base
-from ..models.check import Feedback
-from typing import Optional
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 

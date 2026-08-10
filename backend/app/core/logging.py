@@ -1,5 +1,10 @@
-import logging, json, sys, time
+import json
+import logging
+import sys
+import time
+
 from ..config import settings
+
 
 class JsonFormatter(logging.Formatter):
     def format(self, record):

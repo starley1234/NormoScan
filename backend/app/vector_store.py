@@ -1,12 +1,14 @@
-import uuid, hashlib, math
-from typing import List, Dict, Any, Tuple, Optional
-import numpy as np
-from .config import settings
+import hashlib
 import logging
+import math
+
+import numpy as np
+
+from .config import settings
 
 logger = logging.getLogger(__name__)
 
-def _hash_embedding(text: str, dim: int = 384) -> List[float]:
+def _hash_embedding(text: str, dim: int = 384) -> list[float]:
     # Deterministic mock embedding for dev/tests; replace with sentence-transformers in prod
     h = hashlib.sha256(text.encode()).digest()
     # expand to dim via lặp
@@ -17,21 +19,21 @@ def _hash_embedding(text: str, dim: int = 384) -> List[float]:
     norm = math.sqrt(sum(v*v for v in vals)) or 1
     return [v/norm for v in vals]
 
-def cosine(a: List[float], b: List[float]) -> float:
+def cosine(a: list[float], b: list[float]) -> float:
     return float(np.dot(a,b) / (np.linalg.norm(a)*np.linalg.norm(b) + 1e-9))
 
 class BaseVectorStore:
-    def upsert(self, collection: str, points: List[Dict]): raise NotImplementedError
-    def search(self, collection: str, query_vector: List[float], top_k: int =5, filter: Optional[Dict]=None) -> List[Dict]: raise NotImplementedError
-    def embed_text(self, text: str) -> List[float]: raise NotImplementedError
-    def embed_image(self, image_path: str) -> List[float]: raise NotImplementedError
+    def upsert(self, collection: str, points: list[dict]): raise NotImplementedError
+    def search(self, collection: str, query_vector: list[float], top_k: int =5, filter: dict | None=None) -> list[dict]: raise NotImplementedError
+    def embed_text(self, text: str) -> list[float]: raise NotImplementedError
+    def embed_image(self, image_path: str) -> list[float]: raise NotImplementedError
 
 class MemoryVectorStore(BaseVectorStore):
     def __init__(self):
-        self.store: Dict[str, List[Dict]] = {}
+        self.store: dict[str, list[dict]] = {}
         self.dim = 384
 
-    def embed_text(self, text: str) -> List[float]:
+    def embed_text(self, text: str) -> list[float]:
         try:
             from sentence_transformers import SentenceTransformer
             # lazy load only if available and not mock
@@ -42,7 +44,7 @@ class MemoryVectorStore(BaseVectorStore):
             logger.debug(f"fallback hash embedding: {e}")
         return _hash_embedding(text, self.dim)
 
-    def embed_image(self, image_path: str) -> List[float]:
+    def embed_image(self, image_path: str) -> list[float]:
         # Use hash of path + file bytes if exists
         try:
             with open(image_path,"rb") as f:
@@ -51,7 +53,7 @@ class MemoryVectorStore(BaseVectorStore):
         except:
             return _hash_embedding(image_path, self.dim)
 
-    def upsert(self, collection: str, points: List[Dict]):
+    def upsert(self, collection: str, points: list[dict]):
         if collection not in self.store:
             self.store[collection]=[]
         # replace by id
@@ -60,7 +62,7 @@ class MemoryVectorStore(BaseVectorStore):
             existing[p["id"]] = p
         self.store[collection] = list(existing.values())
 
-    def search(self, collection: str, query_vector: List[float], top_k: int=5, filter: Optional[Dict]=None) -> List[Dict]:
+    def search(self, collection: str, query_vector: list[float], top_k: int=5, filter: dict | None=None) -> list[dict]:
         pts = self.store.get(collection, [])
         scored=[]
         for p in pts:
@@ -79,7 +81,7 @@ class MemoryVectorStore(BaseVectorStore):
 class QdrantVectorStore(BaseVectorStore):
     def __init__(self):
         from qdrant_client import QdrantClient
-        from qdrant_client.http.models import Distance, VectorParams, PointStruct
+        from qdrant_client.http.models import Distance, PointStruct, VectorParams
         self.client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
         self.dim = 384
         self._PointStruct = PointStruct
@@ -97,12 +99,12 @@ class QdrantVectorStore(BaseVectorStore):
             logger.warning(f"Qdrant ensure failed, fallback to memory: {e}")
             raise
 
-    def embed_text(self, text: str) -> List[float]:
+    def embed_text(self, text: str) -> list[float]:
         return self.fallback.embed_text(text)
-    def embed_image(self, image_path: str) -> List[float]:
+    def embed_image(self, image_path: str) -> list[float]:
         return self.fallback.embed_image(image_path)
 
-    def upsert(self, collection: str, points: List[Dict]):
+    def upsert(self, collection: str, points: list[dict]):
         try:
             self._ensure_collection(collection)
             qpoints=[]
@@ -113,7 +115,7 @@ class QdrantVectorStore(BaseVectorStore):
             logger.warning(f"Qdrant upsert failed, using memory fallback: {e}")
             self.fallback.upsert(collection, points)
 
-    def search(self, collection: str, query_vector: List[float], top_k: int=5, filter: Optional[Dict]=None) -> List[Dict]:
+    def search(self, collection: str, query_vector: list[float], top_k: int=5, filter: dict | None=None) -> list[dict]:
         try:
             self._ensure_collection(collection)
             # Qdrant filter not implemented for brevity
@@ -136,7 +138,7 @@ def get_vector_store() -> BaseVectorStore:
         return MemoryVectorStore()
 
 # singleton
-_vector_store: Optional[BaseVectorStore] = None
+_vector_store: BaseVectorStore | None = None
 def vector_store() -> BaseVectorStore:
     global _vector_store
     if _vector_store is None:

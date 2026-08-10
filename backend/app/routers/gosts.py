@@ -1,13 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+import os
+import shutil
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
+
+from ..config import settings
 from ..db import get_db
 from ..models.gost import Gost
 from ..models.user import User
 from ..security import get_current_user
-from ..services.gost_ingest import ingest_folder, search_gost, mark_obsolete
+from ..services.gost_ingest import ingest_folder, search_gost
 from ..services.rag_text import text_rag
-from ..config import settings
-import os, shutil, uuid
 
 router = APIRouter(prefix="/api/gosts", tags=["gosts"])
 

@@ -1,20 +1,23 @@
-from fastapi import FastAPI, Request, Depends
+import logging
+import os
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, PlainTextResponse
-import os, logging
 
 from .config import settings
-from .db import init_db, SessionLocal
-from .routers import auth, checks, gosts, gallery, analytics, admin
-from .mcp_server import handle_mcp, mcp_info
 from .core.logging import setup_logging
 from .core.metrics import metrics
+from .db import SessionLocal, init_db
+from .mcp_server import handle_mcp, mcp_info
+from .routers import admin, analytics, auth, checks, gallery, gosts
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
 from contextlib import asynccontextmanager
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

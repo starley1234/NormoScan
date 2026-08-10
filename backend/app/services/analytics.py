@@ -1,11 +1,13 @@
-from typing import List, Dict, Any
-from sqlalchemy.orm import Session
-from sqlalchemy import or_
-from ..models.check import Check
+import collections
 from datetime import datetime, timedelta
-import collections, re
+from typing import Any
 
-def analytics_summary(db: Session, days: int=30, department: str=None) -> Dict[str,Any]:
+from sqlalchemy.orm import Session
+
+from ..models.check import Check
+
+
+def analytics_summary(db: Session, days: int=30, department: str=None) -> dict[str,Any]:
     since = datetime.utcnow() - timedelta(days=days)
     q = db.query(Check).filter(Check.created_at >= since)
     checks = q.all()
@@ -33,7 +35,7 @@ def analytics_summary(db: Session, days: int=30, department: str=None) -> Dict[s
             if recent > prev:
                 trend = f" Тренд ухудшается: за последнюю неделю {recent} проверок против ~{prev} ранее."
             else:
-                trend = f" Тренд стабильный."
+                trend = " Тренд стабильный."
         if "2.307" in most:
             summary = f"За {days} дней всего {total} проверок. Участились ошибки оформления допусков ({most}) — {top[0][1]} случаев. Рекомендуется обучение по ГОСТ 2.307.{trend}"
         elif "2.104" in most:
@@ -54,7 +56,7 @@ def analytics_summary(db: Session, days: int=30, department: str=None) -> Dict[s
         "trend": by_day
     }
 
-def export_knowledge_base(db: Session) -> List[Dict]:
+def export_knowledge_base(db: Session) -> list[dict]:
     checks = db.query(Check).filter(Check.status=="done").all()
     kb=[]
     for c in checks:
@@ -71,7 +73,7 @@ def export_knowledge_base(db: Session) -> List[Dict]:
         })
     return kb
 
-def search_knowledge_base(db: Session, query: str, top_k: int=10) -> List[Dict]:
+def search_knowledge_base(db: Session, query: str, top_k: int=10) -> list[dict]:
     """Поиск по базе знаний изделий (метаданные)"""
     if not query:
         return export_knowledge_base(db)[:top_k]
@@ -106,7 +108,7 @@ def search_knowledge_base(db: Session, query: str, top_k: int=10) -> List[Dict]:
         })
     return out
 
-def generate_llm_report(db: Session, days: int=30) -> Dict[str,Any]:
+def generate_llm_report(db: Session, days: int=30) -> dict[str,Any]:
     """LLM-отчёт через Gemma (mock: template + RAG)"""
     base = analytics_summary(db, days=days)
     # In prod, call vlm_service or openai client with prompt

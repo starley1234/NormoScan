@@ -1,6 +1,11 @@
-import os, shutil, tarfile, time, logging
+import logging
+import os
+import shutil
+import tarfile
 from datetime import datetime, timedelta
+
 from sqlalchemy.orm import Session
+
 from ..config import settings
 from ..models.check import Check
 

@@ -1,7 +1,7 @@
 import difflib
-from typing import Dict, List
 
-def gost_diff(old_text: str, new_text: str) -> Dict:
+
+def gost_diff(old_text: str, new_text: str) -> dict:
     old_lines = old_text.splitlines()
     new_lines = new_text.splitlines()
     diff = list(difflib.unified_diff(old_lines, new_lines, fromfile="old", tofile="new", lineterm=""))

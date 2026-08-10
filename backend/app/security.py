@@ -1,13 +1,14 @@
 from datetime import datetime, timedelta
-from jose import jwt, JWTError
-from fastapi import Depends, HTTPException, status, Header
+
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
-from typing import Optional
+
 from .config import settings
 from .db import get_db
-from .models.user import User, Role
+from .models.user import User
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -21,7 +22,7 @@ def verify_password(plain: str, hashed: str) -> bool:
     plain = plain[:72]
     return pwd_context.verify(plain, hashed)
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta]=None):
+def create_access_token(data: dict, expires_delta: timedelta | None=None):
     to_encode = data.copy()
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=settings.jwt_expire_minutes))
     to_encode.update({"exp": expire})
@@ -41,7 +42,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise cred_exc
     return user
 
-def get_current_user_optional(authorization: Optional[str] = Header(None), x_koseven_role: Optional[str] = Header(None), db: Session = Depends(get_db)):
+def get_current_user_optional(authorization: str | None = Header(None), x_koseven_role: str | None = Header(None), db: Session = Depends(get_db)):
     # Support Koseven header passthrough
     if x_koseven_role and settings.koseven_enabled:
         # Map Koseven role to internal

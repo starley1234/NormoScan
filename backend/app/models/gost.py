@@ -1,7 +1,10 @@
-from sqlalchemy import String, DateTime, Integer, Text, JSON, Float, Boolean
-from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
+
+from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
 from ..db import Base
+
 
 class Gost(Base):
     __tablename__ = "gosts"

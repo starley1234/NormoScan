@@ -1,17 +1,21 @@
-import os, time, json, logging, traceback, hashlib
+import hashlib
+import logging
+import os
+import time
+import traceback
 from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
-from .db import SessionLocal, engine
-from .models.check import Check, PageResult, DeadLetter
+
 from .config import settings
-from .services.preprocessing import preprocess_pdf
-from .services.segmentation import segment_page
+from .core.metrics import inc_checks, metrics, observe_page_time
+from .db import SessionLocal
+from .models.check import Check, DeadLetter, PageResult
+from .services.metadata import consistency_check
 from .services.ocr import ocr_service
+from .services.preprocessing import preprocess_pdf
 from .services.rag_text import text_rag
 from .services.rag_visual import visual_rag
-from .services.vlm import vlm_service, enrich_errors_with_fixes
-from .services.metadata import consistency_check, extract_all_technical_metadata
-from .core.metrics import inc_checks, observe_page_time, metrics
+from .services.segmentation import segment_page
+from .services.vlm import enrich_errors_with_fixes, vlm_service
 
 logger = logging.getLogger(__name__)
 

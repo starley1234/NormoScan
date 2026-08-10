@@ -1,5 +1,10 @@
-from typing import Dict, Any, List, Optional
-import os, json, re, logging, hashlib, random
+import hashlib
+import json
+import logging
+import random
+import re
+from typing import Any
+
 from ..config import settings
 
 logger = logging.getLogger(__name__)
@@ -41,7 +46,7 @@ def calibrate_confidence(base: float, ocr_conf: float, visual_sim: float=None, r
         conf *= 0.9  # low RAG relevance → lower confidence
     return round(max(0.5, min(0.99, conf)), 2)
 
-def self_check_errors(errors: List[Dict], ocr_text: str, visual_hint: str=None) -> List[Dict]:
+def self_check_errors(errors: list[dict], ocr_text: str, visual_hint: str=None) -> list[dict]:
     # Второй проход-фильтр: снижает false positive на ~30%
     filtered=[]
     for e in errors:
@@ -75,7 +80,7 @@ FIX_TEMPLATES = {
     "2.109": "Оформите Технические Требования по ГОСТ 2.109, пункты нумеруйте.",
 }
 
-def suggest_fix_for_error(err: Dict) -> str:
+def suggest_fix_for_error(err: dict) -> str:
     code = err.get("code","")
     # extract ГОСТ number
     m = re.search(r"2\.\d+", code)
@@ -86,7 +91,7 @@ def suggest_fix_for_error(err: Dict) -> str:
     except:
         return tmpl
 
-def enrich_errors_with_fixes(errors: List[Dict]) -> List[Dict]:
+def enrich_errors_with_fixes(errors: list[dict]) -> list[dict]:
     for e in errors:
         if "suggested_fix" not in e:
             e["suggested_fix"] = suggest_fix_for_error(e)
@@ -95,7 +100,7 @@ def enrich_errors_with_fixes(errors: List[Dict]) -> List[Dict]:
             e["fix_confidence"] = round(random.uniform(0.75,0.95),2) if "random" in dir() else 0.85
     return errors
 
-def _mock_vlm_analysis(image_path: str, ocr_text: str, text_hits: List[Dict], visual_hint: Optional[str], page_number: int, summary_prev: str="", ocr_confidence: float=0.85, visual_sim: float=None, rerank_score: float=None) -> Dict[str,Any]:
+def _mock_vlm_analysis(image_path: str, ocr_text: str, text_hits: list[dict], visual_hint: str | None, page_number: int, summary_prev: str="", ocr_confidence: float=0.85, visual_sim: float=None, rerank_score: float=None) -> dict[str,Any]:
     h = hashlib.md5((image_path + ocr_text[:200]).encode()).hexdigest()
     rnd = random.Random(int(h[:8],16))
     des_match = re.search(r"Обозначение\s*([A-ZА-Я0-9\.\-\s]+)", ocr_text, re.IGNORECASE)
@@ -231,7 +236,9 @@ class VLMService:
     def _vllm_call(self, image_path: str, prompt: str) -> str:
         # OpenAI compatible vLLM
         try:
-            import base64, requests
+            import base64
+
+            import requests
             with open(image_path,"rb") as f:
                 b64 = base64.b64encode(f.read()).decode()
             resp = requests.post("http://localhost:8001/v1/chat/completions", json={
@@ -247,7 +254,7 @@ class VLMService:
             logger.warning(f"vLLM call failed: {e}")
             return ""
 
-    def analyze_page(self, image_path: str, ocr_text: str, text_hits: List[Dict]=None, visual_hint: str=None, page_number: int=1, summary_prev: str="", ocr_confidence: float=0.85, visual_sim: float=None) -> Dict[str,Any]:
+    def analyze_page(self, image_path: str, ocr_text: str, text_hits: list[dict]=None, visual_hint: str=None, page_number: int=1, summary_prev: str="", ocr_confidence: float=0.85, visual_sim: float=None) -> dict[str,Any]:
         max_ctx = settings.max_context_window
         max_chars = max_ctx*3
         if len(ocr_text) > max_chars:

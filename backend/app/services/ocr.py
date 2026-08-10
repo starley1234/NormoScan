@@ -1,11 +1,14 @@
-from typing import Dict, List, Any
-import os, logging
+import logging
+import os
+from typing import Any
+
 from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-def _mock_ocr(image_path: str) -> Dict[str,Any]:
-    import hashlib, random
+def _mock_ocr(image_path: str) -> dict[str,Any]:
+    import hashlib
+    import random
     h = hashlib.md5(image_path.encode()).hexdigest()
     random.seed(int(h[:8],16))
     designations = ["АБВГ.123456.001","АБВГ.123456.002","КП-001.01","МЧ-42.00.01"]
@@ -49,7 +52,7 @@ class OCRService:
                 self.engine="mock"
         return self._paddle
 
-    def _extract_easy(self, image_path: str) -> Dict[str,Any]:
+    def _extract_easy(self, image_path: str) -> dict[str,Any]:
         r = self._ensure_easy()
         if r and os.path.exists(image_path):
             try:
@@ -62,7 +65,7 @@ class OCRService:
                 logger.warning(f"easyocr failed: {e}")
         return None
 
-    def _extract_paddle(self, image_path: str) -> Dict[str,Any]:
+    def _extract_paddle(self, image_path: str) -> dict[str,Any]:
         ocr = self._ensure_paddle()
         if ocr and os.path.exists(image_path):
             try:
@@ -80,7 +83,7 @@ class OCRService:
                 logger.warning(f"paddleocr failed: {e}")
         return None
 
-    def extract(self, image_path: str, zones: dict=None) -> Dict[str,Any]:
+    def extract(self, image_path: str, zones: dict=None) -> dict[str,Any]:
         # Ensemble logic
         if self.engine=="mock":
             return _mock_ocr(image_path)
@@ -109,7 +112,7 @@ class OCRService:
                 return {"text": merged_text, "blocks": secondary["blocks"], "engine": secondary["engine"]+"+fallback", "confidence": secondary["confidence"], "primary": primary, "secondary": secondary}
         return primary
 
-    def extract_with_zones(self, image_path: str, crops: Dict[str,Any]) -> Dict[str,Any]:
+    def extract_with_zones(self, image_path: str, crops: dict[str,Any]) -> dict[str,Any]:
         if not crops:
             res = self.extract(image_path)
             return {"text": res["text"], "zone_texts": {"whole": res}, "whole": res, "engine": res["engine"], "confidence": res.get("confidence",0)}

@@ -1,6 +1,8 @@
+from collections.abc import Generator
+
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.orm import sessionmaker, DeclarativeBase, Session
-from typing import Generator
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+
 from .config import settings
 
 connect_args = {}

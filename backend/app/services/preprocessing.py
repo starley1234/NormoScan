@@ -1,7 +1,9 @@
-import os, io, hashlib
-from typing import List, Dict, Any, Tuple
-from PIL import Image
+import hashlib
 import logging
+import os
+from typing import Any
+
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +20,8 @@ except:
 
 from ..config import settings
 
-def pdf_to_images(pdf_path: str, dpi: int=150) -> List[Tuple[int, str]]:
+
+def pdf_to_images(pdf_path: str, dpi: int=150) -> list[tuple[int, str]]:
     """Split PDF into page images, return list of (page_num, image_path)"""
     out_dir = os.path.join(settings.storage_path, "pages", os.path.basename(pdf_path).replace(".pdf",""))
     os.makedirs(out_dir, exist_ok=True)
@@ -44,7 +47,7 @@ def pdf_to_images(pdf_path: str, dpi: int=150) -> List[Tuple[int, str]]:
     # try PIL open
     try:
         im = Image.open(pdf_path)
-        img_path = os.path.join(out_dir, f"page_001.png")
+        img_path = os.path.join(out_dir, "page_001.png")
         im.save(img_path)
         images.append((1, img_path))
         return images
@@ -75,7 +78,7 @@ def hash_file(path: str) -> str:
             h.update(chunk)
     return h.hexdigest()[:16]
 
-def preprocess_pdf(pdf_path: str) -> List[Dict[str,Any]]:
+def preprocess_pdf(pdf_path: str) -> list[dict[str,Any]]:
     pages = pdf_to_images(pdf_path)
     result=[]
     for num, path in pages:

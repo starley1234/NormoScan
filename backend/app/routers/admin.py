@@ -1,26 +1,27 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
+
+from ..config import settings
 from ..db import get_db
 from ..models.user import User
 from ..security import get_current_user
-from ..config import settings
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
-import json
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 class SettingsIn(BaseModel):
-    vlm_model: Optional[str]=None
-    vlm_quantization: Optional[str]=None
-    vlm_engine: Optional[str]=None
-    max_context_window: Optional[int]=None
-    image_width: Optional[int]=None
-    vram_limit_gb: Optional[int]=None
-    empty_cache_after_page: Optional[bool]=None
-    max_concurrent_vlm: Optional[int]=None
-    ocr_engine: Optional[str]=None
-    ocr_ensemble: Optional[bool]=None
+    vlm_model: str | None=None
+    vlm_quantization: str | None=None
+    vlm_engine: str | None=None
+    max_context_window: int | None=None
+    image_width: int | None=None
+    vram_limit_gb: int | None=None
+    empty_cache_after_page: bool | None=None
+    max_concurrent_vlm: int | None=None
+    ocr_engine: str | None=None
+    ocr_ensemble: bool | None=None
 
 @router.get("/settings")
 def get_settings(user: User=Depends(get_current_user)):
@@ -137,9 +138,11 @@ def change_role(user_id:int, role:str, db: Session=Depends(get_db), user: User=D
 
 # Metadata schemas CRUD
 class SchemaIn(BaseModel):
+    model_config = ConfigDict(protected_namespaces=(), populate_by_name=True)
+
     name: str
-    title: Optional[str]=None
-    schema_json: Dict[str,Any]
+    title: str | None=None
+    schema_: dict[str,Any] = Field(validation_alias="schema_json", serialization_alias="schema_json")
     make_active: bool=True
 
 @router.get("/schemas", summary="Список схем метаданных")
@@ -155,10 +158,11 @@ def upsert_schema(inp: SchemaIn, db: Session=Depends(get_db), user: User=Depends
     if user.role!="admin":
         raise HTTPException(403, "Only admin")
     from ..services.metadata import create_or_update_schema
+    schema_data = inp.schema_
     # Validate JSON schema basics
-    if "type" not in inp.schema_json or "properties" not in inp.schema_json:
+    if "type" not in schema_data or "properties" not in schema_data:
         raise HTTPException(400, "Invalid JSON schema")
-    s = create_or_update_schema(db, inp.name, inp.schema_json, title=inp.title, make_active=inp.make_active, created_by=user.id)
+    s = create_or_update_schema(db, inp.name, schema_data, title=inp.title, make_active=inp.make_active, created_by=user.id)
     return {"id": s.id, "name": s.name, "is_active": s.is_active}
 
 @router.post("/schemas/{schema_id}/activate")
@@ -205,9 +209,11 @@ def restore_trash(check_id: int, db: Session=Depends(get_db), user: User=Depends
 def backup(db: Session=Depends(get_db), user: User=Depends(get_current_user)):
     if user.role!="admin":
         raise HTTPException(403, "Only admin")
-    from ..services.retention import create_backup
-    from fastapi.responses import FileResponse
     import os
+
+    from fastapi.responses import FileResponse
+
+    from ..services.retention import create_backup
     path = create_backup(db)
     if not os.path.exists(path):
         raise HTTPException(500, "Backup failed")

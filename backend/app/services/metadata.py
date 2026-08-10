@@ -1,5 +1,6 @@
-from typing import Dict, Any, List, Optional
-import re, json
+import re
+from typing import Any
+
 from sqlalchemy.orm import Session
 
 DEFAULT_SCHEMA = {
@@ -18,7 +19,7 @@ DEFAULT_SCHEMA = {
     "required":["Обозначение","Наименование"]
 }
 
-def get_active_schema(db: Optional[Session]=None) -> Dict:
+def get_active_schema(db: Session | None=None) -> dict:
     if db is None:
         return DEFAULT_SCHEMA
     try:
@@ -29,7 +30,7 @@ def get_active_schema(db: Optional[Session]=None) -> Dict:
     except: pass
     return DEFAULT_SCHEMA
 
-def validate_metadata(meta: Dict[str,Any], schema: Dict=DEFAULT_SCHEMA) -> List[Dict]:
+def validate_metadata(meta: dict[str,Any], schema: dict=DEFAULT_SCHEMA) -> list[dict]:
     errors=[]
     for req in schema.get("required",[]):
         if not meta.get(req):
@@ -44,7 +45,7 @@ def validate_metadata(meta: Dict[str,Any], schema: Dict=DEFAULT_SCHEMA) -> List[
             except: pass
     return errors
 
-def consistency_check(pages_meta: List[Dict[str,Any]]) -> Dict[str,Any]:
+def consistency_check(pages_meta: list[dict[str,Any]]) -> dict[str,Any]:
     if not pages_meta:
         return {"consistent": True, "issues":[]}
     base = pages_meta[0]
@@ -64,7 +65,7 @@ def consistency_check(pages_meta: List[Dict[str,Any]]) -> Dict[str,Any]:
                 })
     return {"consistent": len(issues)==0, "issues": issues, "base": base}
 
-def extract_all_technical_metadata(ocr_text: str, vlm_meta: Dict, db: Session=None) -> Dict[str,Any]:
+def extract_all_technical_metadata(ocr_text: str, vlm_meta: dict, db: Session=None) -> dict[str,Any]:
     schema = get_active_schema(db)
     meta = dict(vlm_meta or {})
     patterns = {
@@ -90,7 +91,7 @@ def extract_all_technical_metadata(ocr_text: str, vlm_meta: Dict, db: Session=No
     }
     return {"metadata": meta, "kb": kb, "validation": validate_metadata(meta, schema), "schema": schema}
 
-def create_or_update_schema(db: Session, name: str, schema_json: Dict, title: str=None, make_active: bool=True, created_by: int=None):
+def create_or_update_schema(db: Session, name: str, schema_json: dict, title: str=None, make_active: bool=True, created_by: int=None):
     from ..models.app_settings import MetadataSchema
     existing = db.query(MetadataSchema).filter(MetadataSchema.name==name).first()
     if existing:

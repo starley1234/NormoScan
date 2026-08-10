@@ -1,8 +1,10 @@
-from functools import lru_cache
-from pydantic_settings import BaseSettings
-from pydantic import Field
-from typing import Literal, Optional
 import os
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import ConfigDict, Field
+from pydantic_settings import BaseSettings
+
 
 class Settings(BaseSettings):
     app_env: str = Field(default="development", validation_alias="APP_ENV")
@@ -17,7 +19,7 @@ class Settings(BaseSettings):
 
     vector_db: Literal["qdrant","milvus","memory"] = Field(default="memory", validation_alias="VECTOR_DB")
     qdrant_url: str = Field(default="http://localhost:6333", validation_alias="QDRANT_URL")
-    qdrant_api_key: Optional[str] = Field(default=None, validation_alias="QDRANT_API_KEY")
+    qdrant_api_key: str | None = Field(default=None, validation_alias="QDRANT_API_KEY")
     milvus_uri: str = Field(default="http://localhost:19530", validation_alias="MILVUS_URI")
 
     vlm_model: str = Field(default="google/gemma-3-12b-it", validation_alias="VLM_MODEL")
@@ -41,7 +43,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
     jwt_expire_minutes: int = Field(default=1440, validation_alias="JWT_EXPIRE_MINUTES")
     koseven_enabled: bool = Field(default=False, validation_alias="KOSEVEN_ENABLED")
-    koseven_db_dsn: Optional[str] = Field(default=None, validation_alias="KOSEVEN_DB_DSN")
+    koseven_db_dsn: str | None = Field(default=None, validation_alias="KOSEVEN_DB_DSN")
     koseven_table: str = Field(default="koseven_users", validation_alias="KOSEVEN_TABLE")
 
     mcp_enabled: bool = Field(default=True, validation_alias="MCP_ENABLED")
@@ -54,10 +56,11 @@ class Settings(BaseSettings):
     queue_max_retries: int = Field(default=3, validation_alias="QUEUE_MAX_RETRIES")
     enable_sse: bool = Field(default=True, validation_alias="ENABLE_SSE")
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")

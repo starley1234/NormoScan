@@ -1,7 +1,6 @@
-from typing import List, Dict, Any, Optional
-import os, logging
+import logging
+
 from ..vector_store import vector_store
-from ..config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -10,11 +9,11 @@ class VisualRAG:
         self.vs = vector_store()
         self.collection = "gallery_visual"
 
-    def index_gallery_item(self, item_id: str, image_path: str, payload: Dict):
+    def index_gallery_item(self, item_id: str, image_path: str, payload: dict):
         vec = self.vs.embed_image(image_path)
         self.vs.upsert(self.collection, [{"id": item_id, "vector": vec, "payload": payload}])
 
-    def search(self, query_image_path: str, top_k: int=5, threshold: float=0.75) -> List[Dict]:
+    def search(self, query_image_path: str, top_k: int=5, threshold: float=0.75) -> list[dict]:
         qvec = self.vs.embed_image(query_image_path)
         hits = self.vs.search(self.collection, qvec, top_k=top_k)
         # add similarity percent and threshold filter
@@ -37,7 +36,7 @@ class VisualRAG:
         # Return top_k, caller decides threshold
         return out
 
-    def hint_for_vlm(self, query_image_path: str) -> Optional[str]:
+    def hint_for_vlm(self, query_image_path: str) -> str | None:
         hits = self.search(query_image_path, top_k=3)
         if not hits:
             return None

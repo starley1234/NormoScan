@@ -1,7 +1,10 @@
-from sqlalchemy import String, DateTime, Integer, Text, ForeignKey, JSON, Float, Boolean
-from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
+
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
 from ..db import Base
+
 
 class Check(Base):
     __tablename__ = "checks"

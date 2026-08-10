@@ -1,15 +1,16 @@
-import os, cv2, json
-from typing import Dict, List, Tuple, Any
-from PIL import Image
-import numpy as np
 import logging
+import os
+from typing import Any
+
+import cv2
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
 # Zones defined per ГОСТ 2.104 (основная надпись 185x55 etc)
 ZONE_LABELS = ["stamp", "tech_requirements", "specification", "graphic_views", "title_block"]
 
-def detect_zones_heuristic(image_path: str) -> Dict[str, Any]:
+def detect_zones_heuristic(image_path: str) -> dict[str, Any]:
     """
     Интеллектуальный кроп эвристикой + OpenCV:
       - stamp: правый нижний угол ~185x55mm пропорция
@@ -54,7 +55,7 @@ def detect_zones_heuristic(image_path: str) -> Dict[str, Any]:
             "graphic_views":{"bbox":[0.05,0.05,0.90,0.55],"confidence":0.5,"method":"fallback"},
         }
 
-def crop_zone(image_path: str, bbox: List[float], out_path: str) -> str:
+def crop_zone(image_path: str, bbox: list[float], out_path: str) -> str:
     im = Image.open(image_path)
     w,h = im.size
     x,y,bw,bh = bbox
@@ -67,7 +68,7 @@ def crop_zone(image_path: str, bbox: List[float], out_path: str) -> str:
     crop.save(out_path)
     return out_path
 
-def segment_page(image_path: str, check_id: int, page_number: int) -> Dict[str,Any]:
+def segment_page(image_path: str, check_id: int, page_number: int) -> dict[str,Any]:
     zones = detect_zones_heuristic(image_path)
     base = os.path.splitext(image_path)[0]
     crops={}
@@ -80,7 +81,7 @@ def segment_page(image_path: str, check_id: int, page_number: int) -> Dict[str,A
             logger.warning(f"crop failed {label}: {e}")
     return {"zones": zones, "crops": crops}
 
-def batch_segment(pages: List[Dict]) -> List[Dict]:
+def batch_segment(pages: list[dict]) -> list[dict]:
     # pages from preprocessing
     results=[]
     for p in pages:

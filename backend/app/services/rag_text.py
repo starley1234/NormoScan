@@ -1,29 +1,33 @@
-from typing import List, Dict, Any, Optional
-import re, os, logging, math, collections
+import collections
+import logging
+import math
+import os
+import re
+from typing import Any
+
 from ..vector_store import vector_store
-from ..config import settings
 
 logger = logging.getLogger(__name__)
 
 GOST_RE = re.compile(r"ГОСТ\s*\d+[\.\-]\d+(?:\-\d+)?", re.IGNORECASE)
 STP_RE = re.compile(r"СТП\s+[\w\-]+", re.IGNORECASE)
 
-def extract_gost_mentions(text: str) -> List[str]:
+def extract_gost_mentions(text: str) -> list[str]:
     return GOST_RE.findall(text) + STP_RE.findall(text)
 
 # --- BM25 (lightweight, без внешних зависимостей) ---
 class BM25Index:
     def __init__(self, k1=1.5, b=0.75):
         self.k1=k1; self.b=b
-        self.docs: List[Dict]=[]  # {id, text, tokens, payload}
-        self.df: Dict[str,int]=collections.Counter()
+        self.docs: list[dict]=[]  # {id, text, tokens, payload}
+        self.df: dict[str,int]=collections.Counter()
         self.N=0
         self.avgdl=0
 
     def tokenize(self, text:str):
         return re.findall(r"[а-яa-z0-9]+", text.lower())
 
-    def add(self, doc_id:str, text:str, payload:Dict):
+    def add(self, doc_id:str, text:str, payload:dict):
         toks=self.tokenize(text)
         self.docs.append({"id":doc_id,"text":text,"tokens":toks,"payload":payload})
         for t in set(toks):
@@ -67,7 +71,7 @@ class TextRAG:
         except Exception as e:
             logger.debug(f"bm25 add failed: {e}")
 
-    def search(self, query_text: str, top_k: int=5, filter: Optional[Dict]=None, hybrid: bool=True, rerank: bool=True) -> List[Dict]:
+    def search(self, query_text: str, top_k: int=5, filter: dict | None=None, hybrid: bool=True, rerank: bool=True) -> list[dict]:
         mentions = extract_gost_mentions(query_text)
         qvec = self.vs.embed_text(query_text)
         # Vector
@@ -144,7 +148,7 @@ class TextRAG:
             h["score"] = h.get("hybrid_score", h.get("rerank_score", h.get("score",0)))
         return all_hits[:top_k]
 
-    def autocomplete(self, prefix: str, limit: int=5) -> List[str]:
+    def autocomplete(self, prefix: str, limit: int=5) -> list[str]:
         # Simple prefix on designations
         prefix = prefix.strip()
         # From bm25 docs designations
@@ -161,12 +165,12 @@ class TextRAG:
                     cands.add(d)
         return sorted(cands)[:limit]
 
-    def ask(self, query: str, top_k: int=3) -> Dict[str,Any]:
+    def ask(self, query: str, top_k: int=3) -> dict[str,Any]:
         hits = self.search(query, top_k=top_k, hybrid=True, rerank=True)
         context = "\n\n".join([f"[{h['payload'].get('designation')}] {h['snippet']}" for h in hits])
         return {"query": query, "hits": hits, "context": context, "mentions": extract_gost_mentions(query), "hybrid": True, "reranked": True}
 
-    def ingest_gost_file(self, filepath: str, designation: str=None, title: str=None) -> Dict[str,Any]:
+    def ingest_gost_file(self, filepath: str, designation: str=None, title: str=None) -> dict[str,Any]:
         text=""
         try:
             import fitz

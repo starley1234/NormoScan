@@ -1,9 +1,14 @@
-import os, glob, logging, hashlib, time
-from typing import Dict, Any
-from .rag_text import text_rag
-from ..models.gost import Gost
-from sqlalchemy.orm import Session
+import glob
+import hashlib
+import logging
+import os
 import re
+from typing import Any
+
+from sqlalchemy.orm import Session
+
+from ..models.gost import Gost
+from .rag_text import text_rag
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +27,7 @@ def file_hash_and_mtime(path: str):
     except:
         return None, None, None
 
-def ingest_folder(folder: str, db: Session=None, force: bool=False) -> Dict[str,Any]:
+def ingest_folder(folder: str, db: Session=None, force: bool=False) -> dict[str,Any]:
     if not os.path.isdir(folder):
         return {"error": f"Folder not found: {folder}"}
     pdfs = glob.glob(os.path.join(folder, "**", "*.pdf"), recursive=True)
@@ -82,7 +87,7 @@ def ingest_folder(folder: str, db: Session=None, force: bool=False) -> Dict[str,
             results.append({"filepath": f, "error": str(e), "status":"failed"})
     return {"folder": folder, "files_found": len(all_files), "processed": indexed, "skipped": skipped, "details": results, "indexed": indexed}
 
-def search_gost(query: str, top_k: int=5) -> Dict[str,Any]:
+def search_gost(query: str, top_k: int=5) -> dict[str,Any]:
     return text_rag.ask(query, top_k=top_k)
 
 def list_obsolete(db: Session):

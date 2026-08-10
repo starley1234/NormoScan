@@ -1,18 +1,19 @@
-import time, threading
-from typing import Dict, Counter
-from collections import Counter as CounterCls, defaultdict
-import json
+import threading
+import time
+from collections import Counter as CounterCls
+from collections import defaultdict
+
 
 # Simple in-memory metrics (Prometheus-like). For prod, expose via prometheus_client.
 class Metrics:
     def __init__(self):
         self.lock = threading.Lock()
-        self.counters: Dict[str,int] = CounterCls()
-        self.histograms: Dict[str,list] = defaultdict(list)
-        self.gauges: Dict[str,float] = {}
+        self.counters: dict[str,int] = CounterCls()
+        self.histograms: dict[str,list] = defaultdict(list)
+        self.gauges: dict[str,float] = {}
         self.start = time.time()
 
-    def inc(self, name: str, value:int=1, labels:Dict=None):
+    def inc(self, name: str, value:int=1, labels:dict=None):
         key = name if not labels else f"{name}{{{','.join(f'{k}={v}' for k,v in labels.items())}}}"
         with self.lock:
             self.counters[key]+=value

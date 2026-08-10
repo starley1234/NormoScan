@@ -4,10 +4,13 @@ Exposes tools for external LLMs (Claude Desktop, Cursor etc) to use service.
 Implements JSON-RPC 2.0 over HTTP at /mcp
 Spec: https://spec.modelcontextprotocol.io/
 """
-from typing import Dict, Any, List
-import os, json, logging
+import json
+import logging
+import os
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
+
 from .db import SessionLocal
 from .models.check import Check
 from .services.gost_ingest import search_gost
@@ -85,7 +88,7 @@ TOOLS = [
     },
 ]
 
-def tool_check_drawing(args: Dict) -> Dict:
+def tool_check_drawing(args: dict) -> dict:
     file_path = args.get("file_path")
     check_id = args.get("check_id")
     db = SessionLocal()
@@ -106,10 +109,10 @@ def tool_check_drawing(args: Dict) -> Dict:
     finally:
         db.close()
 
-def tool_ask_gost(args: Dict) -> Dict:
+def tool_ask_gost(args: dict) -> dict:
     return search_gost(args["query"], top_k=args.get("top_k",3))
 
-def tool_ask_document(args: Dict) -> Dict:
+def tool_ask_document(args: dict) -> dict:
     db = SessionLocal()
     try:
         c = db.query(Check).filter(Check.id==args["check_id"]).first()
@@ -132,11 +135,11 @@ def tool_ask_document(args: Dict) -> Dict:
     finally:
         db.close()
 
-def tool_search_gallery(args: Dict) -> Dict:
+def tool_search_gallery(args: dict) -> dict:
     hits = visual_rag.search(args["image_path"], top_k=args.get("top_k",5))
     return {"hits": hits}
 
-def tool_get_status(args: Dict) -> Dict:
+def tool_get_status(args: dict) -> dict:
     db=SessionLocal()
     try:
         c=db.query(Check).filter(Check.id==args["check_id"]).first()
@@ -144,7 +147,7 @@ def tool_get_status(args: Dict) -> Dict:
         return {"check_id":c.id,"status":c.status,"pages_done":c.pages_done,"pages_total":c.pages_total,"summary":c.summary,"errors":c.errors_json, "checklist": c.checklist_json}
     finally: db.close()
 
-def tool_search_knowledge(args: Dict) -> Dict:
+def tool_search_knowledge(args: dict) -> dict:
     from .services.analytics import search_knowledge_base
     db=SessionLocal()
     try:
@@ -152,7 +155,7 @@ def tool_search_knowledge(args: Dict) -> Dict:
         return {"query": args["query"], "results": res}
     finally: db.close()
 
-def tool_get_fix(args: Dict) -> Dict:
+def tool_get_fix(args: dict) -> dict:
     db=SessionLocal()
     try:
         c=db.query(Check).filter(Check.id==args["check_id"]).first()
@@ -163,7 +166,7 @@ def tool_get_fix(args: Dict) -> Dict:
         return {"error":"error_id not found"}
     finally: db.close()
 
-def tool_get_metrics(args: Dict) -> Dict:
+def tool_get_metrics(args: dict) -> dict:
     from .core.metrics import metrics
     return metrics.snapshot()
 
@@ -184,7 +187,7 @@ async def handle_mcp(request: Request):
     except:
         return JSONResponse({"jsonrpc":"2.0","error":{"code":-32700,"message":"Parse error"},"id":None})
 
-    def handle_one(msg: Dict) -> Dict:
+    def handle_one(msg: dict) -> dict:
         mid = msg.get("id")
         method = msg.get("method")
         params = msg.get("params",{})

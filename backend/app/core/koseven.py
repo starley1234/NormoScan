@@ -28,7 +28,7 @@ Koseven — любимый фреймворк заказчика (PHP). Инте
   SECRET_KEY=совпадает с Koseven Auth::$hash_key
 """
 
-from typing import Optional, Dict
+
 from sqlalchemy import create_engine, text
 
 ROLE_MAP = {
@@ -43,7 +43,7 @@ ROLE_MAP = {
 def map_koseven_role(koseven_role: str) -> str:
     return ROLE_MAP.get(koseven_role.lower(), "viewer")
 
-def get_koseven_user(dsn: str, table: str, username: str) -> Optional[Dict]:
+def get_koseven_user(dsn: str, table: str, username: str) -> dict | None:
     """
     Запрос пользователя из Koseven БД (read-only).
     Возвращает dict или None.
@@ -57,7 +57,7 @@ def get_koseven_user(dsn: str, table: str, username: str) -> Optional[Dict]:
             return dict(row)
     return None
 
-def verify_koseven_session(cookie_value: str, secret: str) -> Optional[Dict]:
+def verify_koseven_session(cookie_value: str, secret: str) -> dict | None:
     """
     Проверка сессии Koseven (если используете Cookie-based auth).
     Koseven хранит сессию в cookie 'koseven_session' — base64 + hmac.
