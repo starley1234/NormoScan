@@ -23,7 +23,7 @@ out/
 .alembic_version
 qdrant_storage/
 milvus_data/
-models/
+/models/
 *.ckpt
 *.safetensors
 *.bin

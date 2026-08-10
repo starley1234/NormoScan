@@ -147,7 +147,22 @@ try:
     def process_check_low(self, check_id: int):
         return _process_check_logic(check_id)
 
+    def _redis_available() -> bool:
+        try:
+            import redis as _redis
+            r = _redis.from_url(settings.celery_broker_url, socket_connect_timeout=1, socket_timeout=1)
+            r.ping()
+            return True
+        except Exception as e:
+            logger.debug(f"Redis unavailable: {e}")
+            return False
+
     def enqueue_check(check_id: int, priority: int=5):
+        # Fast path: if Redis not available (dev without docker), run synchronously without blocking on Celery timeout
+        if not _redis_available():
+            logger.info(f"Redis not available, running check {check_id} synchronously (priority {priority})")
+            _process_check_logic(check_id)
+            return False
         try:
             if priority <=3:
                 process_check_high.delay(check_id)
