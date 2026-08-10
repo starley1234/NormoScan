@@ -18,7 +18,10 @@ services:
     volumes: [qdrant_storage:/qdrant/storage]
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        WITH_VLM: "false"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes: [./backend:/app, ./storage:/app/storage]
     ports: ["8000:8000"]
@@ -32,11 +35,17 @@ services:
       VECTOR_DB: qdrant
       VLM_MODEL: google/gemma-3-12b-it
       VLM_QUANTIZATION: awq-4bit
+      VLM_ENGINE: mock
+      VLM_API_URL: ${VLM_API_URL-}
+      VLM_API_KEY: ${VLM_API_KEY-}
       MAX_CONTEXT_WINDOW: 8192
     env_file: [.env]
 
   celery_worker:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        WITH_VLM: "false"
     command: celery -A app.celery_app worker --loglevel=INFO -Q high,normoscan,low --concurrency=1
     volumes: [./backend:/app, ./storage:/app/storage]
     depends_on: [redis, postgres, qdrant, backend]
