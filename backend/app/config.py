@@ -24,8 +24,10 @@ class Settings(BaseSettings):
 
     vlm_model: str = Field(default="google/gemma-3-12b-it", validation_alias="VLM_MODEL")
     vlm_quantization: Literal["awq-4bit","gptq-4bit","int8","fp16","mock"] = Field(default="mock", validation_alias="VLM_QUANTIZATION")
-    vlm_engine: Literal["transformers","vllm","mock"] = Field(default="mock", validation_alias="VLM_ENGINE")
+    vlm_engine: Literal["transformers","vllm","mock","openai"] = Field(default="mock", validation_alias="VLM_ENGINE")
     vlm_device: str = Field(default="cuda", validation_alias="VLM_DEVICE")
+    vlm_api_url: str | None = Field(default=None, validation_alias="VLM_API_URL")
+    vlm_api_key: str | None = Field(default=None, validation_alias="VLM_API_KEY")
     max_context_window: int = Field(default=8192, validation_alias="MAX_CONTEXT_WINDOW")
     image_width: int = Field(default=768, validation_alias="IMAGE_WIDTH")
     vram_limit_gb: int = Field(default=16, validation_alias="VRAM_LIMIT_GB")

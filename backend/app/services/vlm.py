@@ -199,9 +199,10 @@ class VLMService:
     def _load(self):
         if self._loaded or self.quant=="mock":
             return
-        # vLLM branch
-        if self.engine=="vllm":
-            logger.info(f"VLM vLLM mode: {self.model_name} (openai compatible at http://localhost:8001/v1)")
+        # API branch (vLLM / OpenAI-совместимый) — локальная модель не грузится
+        if self.engine in ("vllm", "openai"):
+            url = settings.vlm_api_url or "http://localhost:8001/v1"
+            logger.info(f"VLM API mode: {self.model_name} engine={self.engine} url={url} key={'***' if settings.vlm_api_key else 'none'}")
             self._loaded=True
             return
         try:
@@ -234,24 +235,36 @@ class VLMService:
         return {"model": self.model_name, "quant": self.quant, "engine": self.engine}
 
     def _vllm_call(self, image_path: str, prompt: str) -> str:
-        # OpenAI compatible vLLM
+        # OpenAI / vLLM compatible — берёт URL и ключ из .env (VLM_API_URL / VLM_API_KEY)
         try:
             import base64
 
             import requests
+
+            base_url = (settings.vlm_api_url or "http://localhost:8001/v1").rstrip("/")
+            # поддержим и /v1/chat/completions и /chat/completions
+            url = f"{base_url}/chat/completions" if not base_url.endswith("/chat/completions") else base_url
+            headers = {"Content-Type": "application/json"}
+            if settings.vlm_api_key:
+                headers["Authorization"] = f"Bearer {settings.vlm_api_key}"
             with open(image_path,"rb") as f:
                 b64 = base64.b64encode(f.read()).decode()
-            resp = requests.post("http://localhost:8001/v1/chat/completions", json={
+            payload = {
                 "model": self.model_name,
                 "messages": [{"role":"user","content":[
                     {"type":"text","text": prompt},
                     {"type":"image_url","image_url":{"url": f"data:image/png;base64,{b64}"}}
                 ]}],
-                "max_tokens": 1024
-            }, timeout=30)
-            return resp.json()["choices"][0]["message"]["content"]
+                "max_tokens": 1024,
+                "temperature": 0.2,
+            }
+            # для локального vLLM ключ не нужен, для OpenAI/OpenRouter — нужен
+            resp = requests.post(url, json=payload, headers=headers, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
         except Exception as e:
-            logger.warning(f"vLLM call failed: {e}")
+            logger.warning(f"VLM API call failed ({settings.vlm_api_url}): {e}")
             return ""
 
     def analyze_page(self, image_path: str, ocr_text: str, text_hits: list[dict]=None, visual_hint: str=None, page_number: int=1, summary_prev: str="", ocr_confidence: float=0.85, visual_sim: float=None) -> dict[str,Any]:
@@ -278,7 +291,7 @@ class VLMService:
         try:
             few_shot = build_few_shot_prompt()
             strict = "Верни ТОЛЬКО валидный JSON без пояснений. Формат: {\"metadata\":{...}, \"errors\":[{\"code\":\"ГОСТ 2.104\",\"type\":\"штамп\",\"msg\":\"...\",\"severity\":\"error\",\"bbox\":[0,0,0,0]}], \"summary\":\"...\"}"
-            if self.engine=="vllm":
+            if self.engine in ("vllm", "openai"):
                 prompt = f"{few_shot}\n\nТы — нормоконтролер. Предыдущие листы: {summary_prev}\nOCR: {ocr_text[:1500]}\nГОСТ: {[h['snippet'][:200] for h in (text_hits or [])[:2]]}\nПодсказка: {visual_hint or 'нет'}\n{strict}"
                 text = self._vllm_call(image_path, prompt)
                 m = re.search(r"\{.*\}", text, re.DOTALL)
