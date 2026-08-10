@@ -236,17 +236,25 @@ class VLMService:
 
     def _vllm_call(self, image_path: str, prompt: str) -> str:
         # OpenAI / vLLM compatible — берёт URL и ключ из .env (VLM_API_URL / VLM_API_KEY)
+        # Логируем каждый вызов чтобы пользователь видел логи на внешнем сервере
         try:
             import base64
 
             import requests
 
-            base_url = (settings.vlm_api_url or "http://localhost:8001/v1").rstrip("/")
-            # поддержим и /v1/chat/completions и /chat/completions
+            raw = (settings.vlm_api_url or "http://localhost:8001/v1").strip()
+            # очистка от markdown вида [https://...](https://...) и скобок
+            raw = raw.strip().strip("[]()").split("](")[0].split("(")[0].strip()
+            import re
+            ms=re.findall(r"https?://[^\s\]\)]+", raw)
+            if ms: raw=ms[-1]
+            base_url = raw.rstrip("/")
             url = f"{base_url}/chat/completions" if not base_url.endswith("/chat/completions") else base_url
             headers = {"Content-Type": "application/json"}
-            if settings.vlm_api_key:
-                headers["Authorization"] = f"Bearer {settings.vlm_api_key}"
+            if settings.vlm_api_key and settings.vlm_api_key.strip() not in ("", "sk-", "sk"):
+                headers["Authorization"] = f"Bearer {settings.vlm_api_key.strip()}"
+            else:
+                logger.warning(f"VLM_API_KEY пустой/placeholder — запрос без ключа к {url}")
             with open(image_path,"rb") as f:
                 b64 = base64.b64encode(f.read()).decode()
             payload = {
@@ -258,13 +266,16 @@ class VLMService:
                 "max_tokens": 1024,
                 "temperature": 0.2,
             }
-            # для локального vLLM ключ не нужен, для OpenAI/OpenRouter — нужен
+            logger.info(f"VLM запрос → {url} model={self.model_name} engine={self.engine} prompt={len(prompt)} chars image={os.path.basename(image_path)}")
             resp = requests.post(url, json=payload, headers=headers, timeout=30)
+            logger.info(f"VLM ответ ← {url} status={resp.status_code} bytes={len(resp.content)}")
             resp.raise_for_status()
             data = resp.json()
-            return data["choices"][0]["message"]["content"]
+            txt = data["choices"][0]["message"]["content"]
+            logger.info(f"VLM OK: {len(txt)} chars")
+            return txt
         except Exception as e:
-            logger.warning(f"VLM API call failed ({settings.vlm_api_url}): {e}")
+            logger.warning(f"VLM API call failed ({settings.vlm_api_url}): {e}", exc_info=True)
             return ""
 
     def analyze_page(self, image_path: str, ocr_text: str, text_hits: list[dict]=None, visual_hint: str=None, page_number: int=1, summary_prev: str="", ocr_confidence: float=0.85, visual_sim: float=None) -> dict[str,Any]:

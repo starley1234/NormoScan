@@ -15,6 +15,8 @@ class SettingsIn(BaseModel):
     vlm_model: str | None=None
     vlm_quantization: str | None=None
     vlm_engine: str | None=None
+    vlm_api_url: str | None=None
+    vlm_api_key: str | None=None
     max_context_window: int | None=None
     image_width: int | None=None
     vram_limit_gb: int | None=None
@@ -27,10 +29,15 @@ class SettingsIn(BaseModel):
 def get_settings(user: User=Depends(get_current_user)):
     if user.role!="admin":
         raise HTTPException(403, "Only admin")
+    # не отдаём ключ полностью, маскируем
+    api_key_masked = "***" + settings.vlm_api_key[-4:] if settings.vlm_api_key and len(settings.vlm_api_key)>4 else None
     return {
         "vlm_model": settings.vlm_model,
         "vlm_quantization": settings.vlm_quantization,
         "vlm_engine": settings.vlm_engine,
+        "vlm_api_url": settings.vlm_api_url,
+        "vlm_api_key_masked": api_key_masked,
+        "has_vlm_key": bool(settings.vlm_api_key),
         "max_context_window": settings.max_context_window,
         "image_width": settings.image_width,
         "vram_limit_gb": settings.vram_limit_gb,
@@ -53,14 +60,28 @@ def update_settings(inp: SettingsIn, user: User=Depends(get_current_user)):
             raise HTTPException(400, "max_context_window max 32768")
         if k=="image_width" and not (512 <= v <= 800):
             raise HTTPException(400, "image_width must be 512..800")
-        if k=="vlm_engine" and v not in ("transformers","vllm","mock"):
-            raise HTTPException(400, "vlm_engine must be transformers/vllm/mock")
-        setattr(settings, k, v)
+        if k=="vlm_engine" and v not in ("transformers","vllm","openai","mock"):
+            raise HTTPException(400, "vlm_engine must be transformers/vllm/openai/mock")
+        # очистка URL от [] и пробелов (пользователь вставил [https://...](...))
+        if k=="vlm_api_url" and v:
+            v = v.strip().strip("[]()").split("](")[0].split("(")[0].strip()
+            # если вставили markdown ссылку [url](url) — берём первый url
+            import re
+            m=re.search(r"https?://[^\s\]\)]+", v)
+            if m: v=m.group(0)
+            data[k]=v
+        if k=="vlm_api_key" and v:
+            v=v.strip()
+            data[k]=v
+        setattr(settings, k, data[k] if k in ("vlm_api_url","vlm_api_key") else v)
         # also hot-switch VLM if model changed
-        if k in ("vlm_model","vlm_quantization","vlm_engine"):
+        if k in ("vlm_model","vlm_quantization","vlm_engine","vlm_api_url","vlm_api_key"):
             try:
                 from ..services.vlm import vlm_service
                 vlm_service.switch_model(settings.vlm_model, settings.vlm_quantization, settings.vlm_engine)
+                # если поменяли URL/ключ — сбросим флаг загрузки чтобы перечитал
+                if k in ("vlm_api_url","vlm_api_key"):
+                    vlm_service._loaded=False
             except: pass
     return {"status":"updated","settings": data}
 

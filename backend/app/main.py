@@ -100,7 +100,14 @@ def api_mcp_get():
 
 @app.get("/health")
 def health():
-    return {"status":"ok","version":"1.1.0","vrаm_optimized":True,"model":settings.vlm_model,"quant":settings.vlm_quantization,"engine":settings.vlm_engine,"context_window":settings.max_context_window, "ocr_ensemble": settings.ocr_ensemble}
+    # очистим URL от markdown артефактов для показа
+    raw_url = settings.vlm_api_url or ""
+    clean_url = raw_url.strip().strip("[]()").split("](")[0].split("(")[0].strip() if raw_url else None
+    import re
+    if clean_url:
+        ms=re.findall(r"https?://[^\s\]\)]+", clean_url)
+        if ms: clean_url=ms[-1]
+    return {"status":"ok","version":"1.1.0","vrаm_optimized":True,"model":settings.vlm_model,"quant":settings.vlm_quantization,"engine":settings.vlm_engine,"context_window":settings.max_context_window, "ocr_ensemble": settings.ocr_ensemble, "vlm_api_url": clean_url, "has_vlm_key": bool(settings.vlm_api_key)}
 
 @app.get("/api/health")
 def api_health():

@@ -1,59 +1,102 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import requests, os, json, pandas as pd, plotly.express as px, time, io
 from datetime import datetime
 from PIL import Image, ImageDraw
 import base64
 
 API = os.getenv("API_URL", "http://localhost:8000")
+API_PORT = os.getenv("API_PORT", "8000")
+FRONTEND_PORT = os.getenv("FRONTEND_PORT", "8501")
+# Внешний URL для отображения пользователю (хост)
+API_EXTERNAL = f"http://localhost:{API_PORT}"
+try:
+    # если API уже содержит порт, попробуем показать внешний
+    if "backend:" in API:
+        API_EXTERNAL = f"http://localhost:{API_PORT}"
+    else:
+        API_EXTERNAL = API
+except:
+    API_EXTERNAL = API
 
 st.set_page_config(page_title="НормоСкан", page_icon="📐", layout="wide", initial_sidebar_state="expanded")
 
-# PWA + Mobile + Dark mode + Hotkeys
+# --- Инициализация состояния ---
 if "dark" not in st.session_state:
-    st.session_state.dark=False
-# PWA manifest + service worker + mobile viewport + dark/mobile CSS
-st.markdown("""
+    st.session_state.dark = False
+if "token" not in st.session_state:
+    st.session_state.token = None
+    st.session_state.role = None
+    st.session_state.username = None
+
+# --- PWA + Mobile viewport ---
+st.markdown(f"""
 <link rel="manifest" href="/pwa/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <meta name="theme-color" content="#0ea5e9">
-<script>
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('/pwa/service-worker.js').then(()=>console.log('SW ok')).catch(e=>console.log('SW fail',e));
-  // offline queue hint
-  window.addEventListener('offline', ()=>{ const el=document.createElement('div'); el.textContent='⚠️ Оффлайн — загрузка в очередь'; el.style='position:fixed;bottom:10px;left:50%;transform:translateX(-50%);background:#f59e0b;color:white;padding:8px 12px;border-radius:8px;z-index:9999'; document.body.appendChild(el); setTimeout(()=>el.remove(),3000); });
-}
-// hotkeys
-document.addEventListener('keydown', (e)=>{
-  if(e.target.tagName==='INPUT' && e.key!=='Enter') return;
-  if(e.code==='Space' && !e.ctrlKey){ e.preventDefault(); window.dispatchEvent(new CustomEvent('hotkey', {detail:'next'})); }
-  if(e.key==='1' && !e.ctrlKey){ document.querySelector('[data-testid=\"like\"]')?.click(); }
-  if(e.key==='2'){ document.querySelector('[data-testid=\"dislike\"]')?.click(); }
-  if(e.key==='3'){ document.querySelector('[data-testid=\"fix\"]')?.click(); }
-  if(e.ctrlKey && e.key==='Enter'){ document.querySelector('[data-testid=\"ask\"]')?.click(); }
-});
-</script>
 <style>
-kbd{background:#eee;border:1px solid #ccc;padding:2px 6px;border-radius:4px;font-size:0.85em}
-@media (max-width: 768px){
-  [data-testid="stSidebar"]{width:260px !important}
-  .block-container{padding:0.5rem !important}
-  h1{font-size:1.4rem !important}
-}
-body[data-dark="true"]{background:#0f172a !important; color:#e2e8f0}
-body[data-dark="true"] .stApp{background:#0f172a}
+kbd{{background:#eee;border:1px solid #ccc;padding:2px 6px;border-radius:4px;font-size:0.85em;color:#111}}
+@media (max-width: 768px){{
+  [data-testid="stSidebar"]{{width:260px !important}}
+  .block-container{{padding:0.5rem !important}}
+  h1{{font-size:1.4rem !important}}
+  /* Нижняя навигация для мобильных */
+  .mobile-nav{{display:none}}
+}}
+@media (max-width: 768px){{
+  .mobile-nav{{display:flex;position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #e2e8f0;justify-content:space-around;padding:6px 0;z-index:999}}
+  body.dark .mobile-nav{{background:#0f172a;border-color:#334155}}
+}}
 </style>
 """, unsafe_allow_html=True)
-col_dark, col_hot = st.columns([1,3])
-with col_dark:
-    st.session_state.dark = st.toggle("🌙 Тёмная тема", value=st.session_state.dark)
-    st.markdown(f"<script>document.body.setAttribute('data-dark','{str(st.session_state.dark).lower()}')</script>", unsafe_allow_html=True)
-with col_hot:
-    st.caption("Горячие клавиши: <kbd>Space</kbd> след.лист <kbd>1</kbd>👍 <kbd>2</kbd>👎 <kbd>3</kbd>fix <kbd>Ctrl+Enter</kbd> спросить · 📱 PWA: установи на телефон · ✈️ Оффлайн очередь")
 
-if "token" not in st.session_state:
-    st.session_state.token=None
-    st.session_state.role=None
-    st.session_state.username=None
+# PWA service worker - через components.html чтобы JS выполнился
+components.html(f"""
+<script>
+if('serviceWorker' in navigator){{
+  navigator.serviceWorker.register('/pwa/service-worker.js').then(()=>console.log('SW ok')).catch(e=>console.log('SW fail',e));
+}}
+window.addEventListener('offline', ()=>{{
+  const el=document.createElement('div');
+  el.textContent='⚠️ Оффлайн — загрузка в очередь';
+  el.style='position:fixed;bottom:10px;left:50%;transform:translateX(-50%);background:#f59e0b;color:white;padding:8px 12px;border-radius:8px;z-index:9999';
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(),3000);
+}});
+</script>
+""", height=0)
+
+# Dark mode CSS - инжектим в зависимости от состояния
+if st.session_state.dark:
+    st.markdown("""
+    <style>
+    .stApp {background:#0f172a !important; color:#e2e8f0 !important}
+    [data-testid="stSidebar"] {background:#0f172a !important}
+    h1,h2,h3,p,span,div {color:#e2e8f0 !important}
+    kbd {background:#334155 !important; color:#f1f5f9 !important; border-color:#475569 !important}
+    </style>
+    """, unsafe_allow_html=True)
+
+# Hotkeys JS - через components
+components.html("""
+<script>
+document.addEventListener('keydown', (e)=>{
+  if(e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA') return;
+  if(e.code==='Space' && !e.ctrlKey){ e.preventDefault(); window.dispatchEvent(new CustomEvent('hotkey', {detail:'next'})); }
+});
+</script>
+""", height=0)
+
+# Верхняя панель - тёмная тема + горячие клавиши (корректно отображаем kbd)
+col_dark, col_hot = st.columns([1, 3])
+with col_dark:
+    # toggle в основном экране, но синхронизируем с sidebar
+    dark_new = st.toggle("🌙 Тёмная тема", value=st.session_state.dark, key="dark_toggle_main")
+    if dark_new != st.session_state.dark:
+        st.session_state.dark = dark_new
+        st.rerun()
+with col_hot:
+    st.markdown("Горячие клавиши: <kbd>Space</kbd> след.лист &nbsp; <kbd>1</kbd> 👍 &nbsp; <kbd>2</kbd> 👎 &nbsp; <kbd>3</kbd> fix &nbsp; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> спросить &nbsp; 📱 PWA", unsafe_allow_html=True)
 
 def auth_header():
     return {"Authorization": f"Bearer {st.session_state.token}"} if st.session_state.token else {}
@@ -63,7 +106,7 @@ def api_get(path, **kw):
         r = requests.get(f"{API}{path}", headers=auth_header(), timeout=15)
         return r
     except Exception as e:
-        st.error(f"API недоступен: {e}")
+        st.error(f"API недоступен ({API}): {e}")
         return None
 
 def api_post(path, json=None, files=None, data=None):
@@ -71,18 +114,21 @@ def api_post(path, json=None, files=None, data=None):
         r = requests.post(f"{API}{path}", headers=auth_header(), json=json, files=files, data=data, timeout=30)
         return r
     except Exception as e:
-        st.error(f"API недоступен: {e}")
+        st.error(f"API недоступен ({API}): {e}")
         return None
 
-# Sidebar
+# Sidebar - логика: если не залогинен, показываем только вход, навигацию скрываем
 with st.sidebar:
     st.title("📐 НормоСкан")
     st.caption("Интеллектуальный нормоконтроль · 16GB VRAM")
+    # Dark toggle дублируем в sidebar
+    st.toggle("🌙 Тёмная тема", value=st.session_state.dark, key="dark_toggle_sidebar", on_change=lambda: setattr(st.session_state, 'dark', not st.session_state.dark))
+    
     if not st.session_state.token:
         st.subheader("Вход")
-        u = st.text_input("Логин", value="admin")
-        p = st.text_input("Пароль", value="admin123", type="password")
-        if st.button("Войти"):
+        u = st.text_input("Логин", value="admin", key="login_user")
+        p = st.text_input("Пароль", value="admin123", type="password", key="login_pass")
+        if st.button("Войти", key="login_btn"):
             try:
                 r = requests.post(f"{API}/api/auth/login", data={"username":u,"password":p})
                 if r.status_code==200:
@@ -98,26 +144,43 @@ with st.sidebar:
         st.divider()
         st.info("Demo: admin/admin123, norm/norm123, engineer/eng123")
         st.warning("Весь инференс локальный. Данные не уходят наружу.")
+        st.divider()
+        st.caption(f"API (внутренний): {API}")
+        st.caption(f"API (внешний): {API_EXTERNAL} (порт {API_PORT})")
+        st.caption(f"Модель: загрузка...")
+        page = None
     else:
         st.success(f"Вы: {st.session_state.username} ({st.session_state.role})")
-        if st.button("Выйти"):
+        if st.button("Выйти", key="logout_btn"):
             st.session_state.token=None
             st.rerun()
-    st.divider()
-    page = st.radio("Навигация", ["Дашборд","Загрузка","Проверки","Команда","ГОСТы","Галерея","База знаний","Аналитика","Админка","MCP","Метрики"], index=0)
-    st.divider()
-    st.caption(f"API: {API}")
-    try:
-        h=requests.get(f"{API}/health",timeout=2).json()
-        st.caption(f"Модель: {h.get('model','')} | ctx {h.get('context_window')} | {h.get('engine','')}")
-        if h.get("ocr_ensemble"):
-            st.caption("OCR ансамбль: вкл")
-    except: pass
-    st.caption("VRAM 16GB optimised · 768px · 4-bit")
+        st.divider()
+        page = st.radio("Навигация", ["Дашборд","Загрузка","Проверки","Команда","ГОСТы","Галерея","База знаний","Аналитика","Админка","MCP","Метрики"], index=0, key="nav_radio")
+        st.divider()
+        st.caption(f"API (внутренний): {API}")
+        st.caption(f"API (внешний): {API_EXTERNAL}")
+        try:
+            h=requests.get(f"{API}/health",timeout=2).json()
+            st.caption(f"Модель: {h.get('model','')} | ctx {h.get('context_window')} | {h.get('engine','')}")
+            if h.get("ocr_ensemble"):
+                st.caption("OCR ансамбль: вкл")
+            # Показываем VLM API URL если задан (без ключа)
+            if h.get("vlm_api_url"):
+                st.caption(f"VLM API: {h.get('vlm_api_url')}")
+        except: pass
+        st.caption("VRAM 16GB optimised · 768px · 4-bit")
+        st.caption(f"UI порт: {FRONTEND_PORT}, API порт: {API_PORT}")
 
 if not st.session_state.token:
     st.title("📐 НормоСкан — вход required")
+    st.markdown("Войдите через боковую панель слева. Навигация появится после входа.")
+    st.info("После входа вы увидите дашборд, проверки, галерею и т.д.")
     st.stop()
+
+# page уже определён выше внутри sidebar else, если token есть
+# если по какой-то причине page is None (когда залогинен но не выбрано), дефолтим
+if 'page' not in locals() or page is None:
+    page = "Дашборд"
 
 def status_badge(s):
     colors={"queued":"🟡","processing":"🔵","done":"🟢","failed":"🔴","dead_letter":"⚫","dedupe":"🟣"}
@@ -131,13 +194,11 @@ def draw_annotations(image_path, annotations):
         for a in annotations:
             bbox = a.get("bbox")
             if not bbox: continue
-            # bbox is relative [x,y,w,h]
             x,y,bw,bh = bbox
             left=int(x*w); upper=int(y*h); right=int((x+bw)*w); lower=int((y+bh)*h)
             color = (255,0,0,180) if a.get("severity")=="error" else (255,165,0,180) if a.get("severity")=="warning" else (0,0,255,120)
             draw.rectangle([left,upper,right,lower], outline=color[:3], width=3)
             draw.rectangle([left,upper,right,lower], fill=color[:3]+(40,))
-            # label
             draw.text((left, upper-12), a.get("code",""), fill=(255,0,0))
         return im
     except Exception as e:
@@ -174,7 +235,6 @@ if page=="Дашборд":
             st.subheader("Метрики")
             m=j.get("metrics",{})
             st.json({"uptime_h": j.get("uptime_hours"), "hit_rate": j.get("hit_rate"), "counters": m.get("counters",{})})
-        # Active Learning control
         st.divider()
         st.subheader("🤖 Active Learning замкнутый")
         st.caption("Берёт 👎 из галереи, переиндексирует, меряет Hit Rate до/после")
@@ -192,14 +252,13 @@ if page=="Дашборд":
 
 elif page=="Загрузка":
     st.header("📤 Загрузка чертежа")
-    st.info("Поддерживается PDF А0-А4. Система: 768px ресайз + кроп (штамп/ТТ/графика) → OCR ансамбль → Hybrid RAG (Qdrant) → Gemma-3-12B 4-bit → JSON + чек-лист. Дедeпликация по хэшу 5 мин.")
+    st.info("Поддерживается PDF А0-А4. Система: 768px ресайз + кроп (штамп/ТТ/графика) → OCR ансамбль → Hybrid RAG (Qdrant) → Gemma-3-12B 4-bit → JSON + чек-лист. Дедупликация по хэшу 5 мин.")
     col1,col2 = st.columns([2,1])
     with col1:
         prio = st.select_slider("Приоритет", options=[1,3,5,8,10], value=5, help="1=высший")
         up = st.file_uploader("Выберите PDF", type=["pdf"])
         dedupe_info = st.empty()
         if up:
-            # клиентский хэш для подсказки
             import hashlib
             h = hashlib.sha256(up.getvalue()).hexdigest()[:16]
             dedupe_info.caption(f"Хэш: {h} · если такой файл уже проверяли <5мин — вернётся готовый результат (экономия VRAM)")
@@ -215,7 +274,6 @@ elif page=="Загрузка":
                     else:
                         st.success(f"Проверка #{j['check_id']} поставлена в очередь ({j['status']})")
                         st.json(j)
-                        # SSE прогресс
                         if st.checkbox("Показать прогресс (SSE)", value=True):
                             placeholder = st.empty()
                             bar = st.progress(0)
@@ -238,6 +296,7 @@ elif page=="Загрузка":
         st.write("- А1 простыня режется на зоны, не подавайте целиком")
         st.write("- Масса/Материал в штампе проверяются по ГОСТ 2.104")
         st.write("- Используйте «Галерею» чтобы обучить Visual RAG")
+        st.info(f"VLM внешний: {API_EXTERNAL} — логи в `docker logs normoscan-backend` / `celery_worker`")
 
 elif page=="Проверки":
     st.header("📋 Реестр проверок")
@@ -268,17 +327,14 @@ elif page=="Проверки":
                     d=rr.json()
                     st.subheader(f"Проверка #{d['id']} — {d['filename']} {status_badge(d['status'])}")
                     st.write(d["summary"] or "")
-                    # Checklist
                     cl = d.get("checklist")
                     if cl:
                         st.subheader("✅ Чек-лист ГОСТов")
                         for item in cl.get("items",[]):
                             icon = "❌" if item["status"]=="fail" else "✅"
                             st.write(f"{icon} **{item['code']}** — {item['desc']} ({item['count']} замечаний)" if item["status"]=="fail" else f"{icon} {item['code']} — {item['desc']}")
-                    # metadata
                     with st.expander("📄 Метаданные (штамп)", expanded=True):
                         st.json(d.get("meta_json") or {})
-                        # validation via active schema
                         if st.button("Проверить по схеме"):
                             st.info("Схема проверяется на сервере при анализе (см. /api/checks/meta/schema)")
                     if d.get("consistency") and not d["consistency"].get("consistent"):
@@ -286,7 +342,6 @@ elif page=="Проверки":
                         for iss in d["consistency"]["issues"]:
                             st.error(f"{iss['msg']} → {iss.get('suggested_fix','')}")
                             st.json(iss)
-                    # errors with fixes
                     errs=d.get("errors_json") or []
                     if errs:
                         st.error(f"Найдено {len(errs)} замечаний")
@@ -297,7 +352,6 @@ elif page=="Проверки":
                                     st.success(f"💡 Как исправить: {e['suggested_fix']} (уверенность {e.get('fix_confidence',0):.0%})")
                                     if st.button(f"Скопировать fix {e.get('id')}", key=f"copy_{e.get('id')}"):
                                         st.code(e["suggested_fix"])
-                                # annotations bbox
                                 if e.get("bbox"):
                                     st.caption(f"BBOX: {e['bbox']}")
                                 c1,c2,c3 = st.columns(3)
@@ -315,33 +369,26 @@ elif page=="Проверки":
                                         if rr2: st.json(rr2.json())
                     else:
                         st.success("Замечаний не найдено")
-                    # pages + annotations
                     st.subheader("📑 Постранично + аннотации")
-                    # fetch annotations
                     ann_r = api_get(f"/api/checks/{int(sel)}/annotations")
                     ann_data = ann_r.json() if ann_r and ann_r.status_code==200 else {"annotations":[]}
                     for p in d.get("pages",[]):
                         with st.expander(f"Лист {p['page_number']} — {len(p.get('errors') or [])} ошибок, OCR {p.get('ocr_confidence',0):.0%}"):
                             st.json(p)
-                            # Try to show annotated image if available
-                            # We don't have direct image path via API, but via /storage
-                            # For demo, show placeholder
-                            # Спросить по документу
                     st.subheader("💬 Вопрос по документу")
                     q=st.text_input("Задайте вопрос (напр. 'какая масса?', 'чек-лист?', 'какие ошибки по ГОСТ 2.307?')", key="ask_doc_q")
                     colA,colB=st.columns(2)
                     with colA:
-                        if st.button("Спросить"):
+                        if st.button("Спросить", key="ask_doc_btn"):
                             rrr=api_post(f"/api/checks/{d['id']}/ask", json={"query":q})
                             if rrr and rrr.status_code==200:
                                 st.json(rrr.json())
                     with colB:
                         if st.button("Показать аннотации JSON"):
                             st.json(ann_data)
-                    # SSE stream demo
                     if d["status"] in ("queued","processing"):
                         if st.button("📡 Следить (SSE)"):
-                            st.info("SSE стрим: /api/checks/{id}/stream — в браузере EventSource, здесь polling fallback")
+                            st.info("SSE стрим: /api/checks/{id}/stream — polling fallback")
                             bar=st.progress(d["pages_done"]/max(d["pages_total"],1))
                 else:
                     st.error("Не найдено")
@@ -350,7 +397,7 @@ elif page=="Проверки":
 
 elif page=="Команда":
     st.header("👥 Командная работа")
-    st.caption("Назначение, ревью (approve/reject), комментарии на bbox с @mention — всё в одном месте. Уведомления — пока в UI, далее Telegram/Email")
+    st.caption("Назначение, ревью (approve/reject), комментарии на bbox с @mention — всё в одном месте.")
     tab_a, tab_b, tab_c = st.tabs(["Мои задачи","Назначить","Комментарии"])
     with tab_a:
         r=api_get("/api/team/my/assignments")
@@ -365,7 +412,6 @@ elif page=="Команда":
                         st.json(rr.json().get("summary",""))
             else:
                 st.info("Нет назначений — попроси админа назначить")
-        # review
         st.divider()
         st.subheader("Ревью")
         cid=st.number_input("Check ID для ревью", min_value=0, step=1, key="rev_cid")
@@ -378,7 +424,6 @@ elif page=="Команда":
         if st.session_state.role not in ("admin","normocontroller"):
             st.warning("Только admin/normocontroller может назначать")
         else:
-            # list users
             r=api_get("/api/admin/users")
             users=[]
             if r and r.status_code==200:
@@ -390,14 +435,12 @@ elif page=="Команда":
             if st.button("Назначить"):
                 rr=api_post(f"/api/team/checks/{int(cid2)}/assign", json={"assignee_id": int(aid), "comment": note})
                 st.json(rr.json() if rr else {})
-            # show assignments for check
             if cid2:
                 rr=api_get(f"/api/team/checks/{int(cid2)}/assignments")
                 if rr: st.json(rr.json())
     with tab_c:
         cid3=st.number_input("Check ID для комментариев", min_value=0, step=1, key="comm_cid")
         if cid3:
-            # list comments
             r=api_get(f"/api/team/checks/{int(cid3)}/comments")
             if r and r.status_code==200:
                 for c in r.json().get("items",[]):
@@ -444,7 +487,6 @@ elif page=="ГОСТы":
         df=pd.DataFrame(j["items"])
         if not df.empty:
             st.dataframe(df, use_container_width=True, hide_index=True)
-            # obsolete action
             if st.session_state.role=="admin":
                 gid=st.number_input("ID ГОСТа для пометки obsolete", min_value=0, step=1)
                 sup=st.text_input("Заменён на", placeholder="ГОСТ 2.104-2024")
@@ -453,7 +495,6 @@ elif page=="ГОСТы":
                     st.json(rr.json() if rr else {})
         else:
             st.info("ГОСТов нет")
-    # Diff ГОСТов
     with st.expander("🔀 Diff ГОСТов (сравнение версий)"):
         c1,c2=st.columns(2)
         with c1: old_id=st.number_input("Старый ID", min_value=0, step=1, key="old_gost")
@@ -465,13 +506,12 @@ elif page=="ГОСТы":
                 st.write(f"Добавлено: {j.get('added')} · Удалено: {j.get('removed')}")
                 st.code("\n".join(j.get("diff",[])[:200]), language="diff")
                 if j.get("html"):
-                    st.components.v1.html(j["html"], height=300, scrolling=True)
+                    components.html(j["html"], height=300, scrolling=True)
             else:
                 st.error(r.text if r else "Ошибка")
     st.divider()
     st.subheader("Поиск / Вопрос по ГОСТам — Hybrid RAG + cross-encoder re-rank")
-    q=st.text_input("Вопрос", placeholder="Какие требования к основной надписи по ГОСТ 2.104?")
-    # Autocomplete
+    q=st.text_input("Вопрос", placeholder="Какие требования к основной надписи по ГОСТ 2.104?", key="gost_q")
     if len(q.strip())>=2:
         r_ac=api_get(f"/api/gosts/autocomplete?q={q}&limit=5")
         if r_ac and r_ac.status_code==200:
@@ -481,8 +521,8 @@ elif page=="ГОСТы":
                 sel=st.selectbox("Выбрать подсказку", [""]+sug, key="ac_sel")
                 if sel:
                     q=sel
-    topk=st.slider("top_k",1,10,3)
-    if st.button("Искать"):
+    topk=st.slider("top_k",1,10,3, key="gost_topk")
+    if st.button("Искать", key="gost_search"):
         r=api_post("/api/gosts/search", json={"query":q,"top_k":topk})
         if r and r.status_code==200:
             j=r.json()
@@ -498,11 +538,9 @@ elif page=="Галерея":
     with c1:
         st.subheader("Добавить")
         up=st.file_uploader("Скриншот", type=["png","jpg","jpeg"], key="gal_up")
-        # crop preview
         if up:
             img=Image.open(up)
             st.image(img, caption="Оригинал (вырежьте узел в редакторе выше, если нужно)", use_column_width=True)
-            # Simple crop sliders for demo
             w,h = img.size
             x=st.slider("X",0, w, 0)
             y=st.slider("Y",0, h, 0)
@@ -559,9 +597,9 @@ elif page=="Галерея":
 elif page=="База знаний":
     st.header("🔎 База знаний изделий")
     st.caption("Поиск по всем проверенным чертежам: обозначение, наименование, материал, масса.")
-    q=st.text_input("Запрос", placeholder="АБВГ.123456 или Вал, Сталь 45")
+    q=st.text_input("Запрос", placeholder="АБВГ.123456 или Вал, Сталь 45", key="kb_q")
     topk=st.slider("top_k",1,20,5, key="kb_topk")
-    if st.button("Искать в БЗ"):
+    if st.button("Искать в БЗ", key="kb_search"):
         r=api_get(f"/api/checks/knowledge/search?q={q}&top_k={topk}")
         if r and r.status_code==200:
             st.json(r.json())
@@ -569,14 +607,14 @@ elif page=="База знаний":
                 st.write(f"{it.get('designation')} — {it.get('name')} · {it.get('material')} (score {it.get('score')})")
     st.divider()
     st.subheader("Экспорт")
-    if st.button("Скачать JSON"):
+    if st.button("Скачать JSON", key="kb_dl"):
         r=api_get("/api/checks/knowledge/export")
         if r: st.download_button("Скачать", data=json.dumps(r.json(), ensure_ascii=False, indent=2), file_name="knowledge.json", mime="application/json")
 
 elif page=="Аналитика":
     st.header("📊 Аналитика и отчеты")
-    days=st.slider("Период (дней)",7,90,30)
-    dept=st.text_input("Отдел (опционально)", placeholder="5")
+    days=st.slider("Период (дней)",7,90,30, key="ana_days")
+    dept=st.text_input("Отдел (опционально)", placeholder="5", key="ana_dept")
     col1,col2 = st.columns(2)
     with col1:
         r=api_get(f"/api/analytics/summary?days={days}" + (f"&department={dept}" if dept else ""))
@@ -625,10 +663,14 @@ elif page=="Админка":
         if r and r.status_code==200:
             s=r.json()
             st.json(s)
+            # Показываем VLM API URL без ключа
+            st.caption(f"VLM API URL: {s.get('vlm_api_url') or 'не задан (mock)'}")
             with st.form("settings_form"):
                 model=st.text_input("VLM_MODEL", value=s["vlm_model"])
                 quant=st.selectbox("VLM_QUANTIZATION", ["mock","awq-4bit","gptq-4bit","int8","fp16"], index=["mock","awq-4bit","gptq-4bit","int8","fp16"].index(s["vlm_quantization"]) if s["vlm_quantization"] in ["mock","awq-4bit","gptq-4bit","int8","fp16"] else 0)
-                engine=st.selectbox("VLM_ENGINE", ["mock","transformers","vllm"], index=["mock","transformers","vllm"].index(s.get("vlm_engine","mock")) if s.get("vlm_engine","mock") in ["mock","transformers","vllm"] else 0)
+                engine=st.selectbox("VLM_ENGINE", ["mock","transformers","vllm","openai"], index=["mock","transformers","vllm","openai"].index(s.get("vlm_engine","mock")) if s.get("vlm_engine","mock") in ["mock","transformers","vllm","openai"] else 0)
+                vlm_url=st.text_input("VLM_API_URL", value=s.get("vlm_api_url") or "", placeholder="https://llm.example.com/v1")
+                vlm_key=st.text_input("VLM_API_KEY", value="", type="password", placeholder="sk-... (оставьте пустым чтобы не менять)")
                 ctx=st.slider("MAX_CONTEXT_WINDOW", 2048, 32768, s["max_context_window"], step=1024)
                 width=st.slider("IMAGE_WIDTH", 512,800, s["image_width"])
                 vram=st.slider("VRAM_LIMIT_GB", 8,24, s["vram_limit_gb"])
@@ -636,7 +678,10 @@ elif page=="Админка":
                 maxc=st.number_input("MAX_CONCURRENT_VLM", 1,4, s["max_concurrent_vlm"])
                 ocr_ens=st.checkbox("OCR_ENSEMBLE", value=s.get("ocr_ensemble", True))
                 if st.form_submit_button("Сохранить"):
-                    rr=api_post("/api/admin/settings", json={"vlm_model":model,"vlm_quantization":quant,"vlm_engine":engine,"max_context_window":ctx,"image_width":width,"vram_limit_gb":vram,"empty_cache_after_page":empty,"max_concurrent_vlm":maxc,"ocr_ensemble":ocr_ens})
+                    payload={"vlm_model":model,"vlm_quantization":quant,"vlm_engine":engine,"max_context_window":ctx,"image_width":width,"vram_limit_gb":vram,"empty_cache_after_page":empty,"max_concurrent_vlm":maxc,"ocr_ensemble":ocr_ens}
+                    if vlm_url: payload["vlm_api_url"]=vlm_url
+                    if vlm_key: payload["vlm_api_key"]=vlm_key
+                    rr=api_post("/api/admin/settings", json=payload)
                     if rr: st.json(rr.json() if rr.status_code==200 else rr.text)
             st.divider()
             st.subheader("Быстрое переключение (16GB ↔ лёгкая)")
@@ -715,7 +760,6 @@ elif page=="Админка":
         r=api_get("/api/admin/metrics")
         if r and r.status_code==200:
             st.json(r.json())
-            # prometheus text
             rp=requests.get(f"{API}/metrics", headers=auth_header())
             if rp.status_code==200:
                 st.code(rp.text[:2000], language="bash")
