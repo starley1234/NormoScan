@@ -274,7 +274,6 @@ class VLMService:
             if self.engine=="vllm":
                 prompt = f"{few_shot}\n\nТы — нормоконтролер. Предыдущие листы: {summary_prev}\nOCR: {ocr_text[:1500]}\nГОСТ: {[h['snippet'][:200] for h in (text_hits or [])[:2]]}\nПодсказка: {visual_hint or 'нет'}\n{strict}"
                 text = self._vllm_call(image_path, prompt)
-                import json, re
                 m = re.search(r"\{.*\}", text, re.DOTALL)
                 if m:
                     j = json.loads(m.group(0))
@@ -302,7 +301,6 @@ OCR: {ocr_text[:1500]}
             with torch.inference_mode():
                 out = self.model.generate(**inputs, max_new_tokens=max_new)
             text = self.processor.decode(out[0], skip_special_tokens=True)
-            import json, re
             m = re.search(r"\{.*\}", text, re.DOTALL)
             if m:
                 j = json.loads(m.group(0))
