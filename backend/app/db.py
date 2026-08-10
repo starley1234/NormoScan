@@ -52,7 +52,7 @@ def _migrate_sqlite():
 
 def init_db():
     # import models to register
-    from .models import user, check, gost, gallery, app_settings  # noqa
+    from .models import app_settings, check, gallery, gost, team, user  # noqa
     Base.metadata.create_all(bind=engine)
     if settings.is_sqlite():
         _migrate_sqlite()

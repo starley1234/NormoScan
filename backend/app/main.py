@@ -11,7 +11,7 @@ from .core.logging import setup_logging
 from .core.metrics import metrics
 from .db import SessionLocal, init_db
 from .mcp_server import handle_mcp, mcp_info
-from .routers import admin, analytics, auth, checks, gallery, gosts
+from .routers import admin, analytics, auth, checks, dashboard, gallery, gosts, team
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -78,6 +78,8 @@ app.include_router(gosts.router)
 app.include_router(gallery.router)
 app.include_router(analytics.router)
 app.include_router(admin.router)
+app.include_router(team.router)
+app.include_router(dashboard.router)
 
 # MCP endpoints
 @app.post("/mcp")
@@ -122,4 +124,8 @@ def root():
 if os.path.isdir(settings.storage_path):
     try:
         app.mount("/storage", StaticFiles(directory=settings.storage_path), name="storage")
+    except: pass
+if os.path.isdir("frontend/static"):
+    try:
+        app.mount("/pwa", StaticFiles(directory="frontend/static"), name="pwa")
     except: pass

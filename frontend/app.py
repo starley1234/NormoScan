@@ -8,9 +8,21 @@ API = os.getenv("API_URL", "http://localhost:8000")
 
 st.set_page_config(page_title="НормоСкан", page_icon="📐", layout="wide", initial_sidebar_state="expanded")
 
-# Горячие клавиши: Space следующий лист, 1/2/3 👍/👎/fix, Ctrl+Enter спросить
+# PWA + Mobile + Dark mode + Hotkeys
+if "dark" not in st.session_state:
+    st.session_state.dark=False
+# PWA manifest + service worker + mobile viewport + dark/mobile CSS
 st.markdown("""
+<link rel="manifest" href="/pwa/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#0ea5e9">
 <script>
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/pwa/service-worker.js').then(()=>console.log('SW ok')).catch(e=>console.log('SW fail',e));
+  // offline queue hint
+  window.addEventListener('offline', ()=>{ const el=document.createElement('div'); el.textContent='⚠️ Оффлайн — загрузка в очередь'; el.style='position:fixed;bottom:10px;left:50%;transform:translateX(-50%);background:#f59e0b;color:white;padding:8px 12px;border-radius:8px;z-index:9999'; document.body.appendChild(el); setTimeout(()=>el.remove(),3000); });
+}
+// hotkeys
 document.addEventListener('keydown', (e)=>{
   if(e.target.tagName==='INPUT' && e.key!=='Enter') return;
   if(e.code==='Space' && !e.ctrlKey){ e.preventDefault(); window.dispatchEvent(new CustomEvent('hotkey', {detail:'next'})); }
@@ -20,9 +32,23 @@ document.addEventListener('keydown', (e)=>{
   if(e.ctrlKey && e.key==='Enter'){ document.querySelector('[data-testid=\"ask\"]')?.click(); }
 });
 </script>
-<style>kbd{background:#eee;border:1px solid #ccc;padding:2px 6px;border-radius:4px;font-size:0.85em}</style>
+<style>
+kbd{background:#eee;border:1px solid #ccc;padding:2px 6px;border-radius:4px;font-size:0.85em}
+@media (max-width: 768px){
+  [data-testid="stSidebar"]{width:260px !important}
+  .block-container{padding:0.5rem !important}
+  h1{font-size:1.4rem !important}
+}
+body[data-dark="true"]{background:#0f172a !important; color:#e2e8f0}
+body[data-dark="true"] .stApp{background:#0f172a}
+</style>
 """, unsafe_allow_html=True)
-st.caption("Горячие клавиши: <kbd>Space</kbd> след.лист <kbd>1</kbd>👍 <kbd>2</kbd>👎 <kbd>3</kbd>fix <kbd>Ctrl+Enter</kbd> спросить")
+col_dark, col_hot = st.columns([1,3])
+with col_dark:
+    st.session_state.dark = st.toggle("🌙 Тёмная тема", value=st.session_state.dark)
+    st.markdown(f"<script>document.body.setAttribute('data-dark','{str(st.session_state.dark).lower()}')</script>", unsafe_allow_html=True)
+with col_hot:
+    st.caption("Горячие клавиши: <kbd>Space</kbd> след.лист <kbd>1</kbd>👍 <kbd>2</kbd>👎 <kbd>3</kbd>fix <kbd>Ctrl+Enter</kbd> спросить · 📱 PWA: установи на телефон · ✈️ Оффлайн очередь")
 
 if "token" not in st.session_state:
     st.session_state.token=None
@@ -78,7 +104,7 @@ with st.sidebar:
             st.session_state.token=None
             st.rerun()
     st.divider()
-    page = st.radio("Навигация", ["Загрузка","Проверки","ГОСТы","Галерея","База знаний","Аналитика","Админка","MCP","Метрики"], index=0)
+    page = st.radio("Навигация", ["Дашборд","Загрузка","Проверки","Команда","ГОСТы","Галерея","База знаний","Аналитика","Админка","MCP","Метрики"], index=0)
     st.divider()
     st.caption(f"API: {API}")
     try:
@@ -119,7 +145,52 @@ def draw_annotations(image_path, annotations):
         return None
 
 # === PAGES ===
-if page=="Загрузка":
+if page=="Дашборд":
+    st.header("📊 Лёгкий Дашборд — без Grafana")
+    st.caption("Живые метрики из /api/dashboard/summary + /api/metrics (в памяти, без внешних зависимостей)")
+    colA,colB,colC,colD = st.columns(4)
+    r=api_get("/api/dashboard/summary?days=7")
+    if r and r.status_code==200:
+        j=r.json()
+        with colA: st.metric("Всего", j.get("total",0))
+        with colB: st.metric("Готово", j.get("done",0))
+        with colC: st.metric("На проверке", j.get("pending_reviews",0))
+        with colD: st.metric("Hit Rate", f"{j.get('hit_rate',0):.0%}")
+        st.info(j.get("summary",""))
+        c1,c2=st.columns(2)
+        with c1:
+            if j.get("by_day"):
+                df=pd.DataFrame(list(j["by_day"].items()), columns=["дата","кол-во"])
+                st.plotly_chart(px.line(df, x="дата", y="кол-во", title="Динамика 7д"), use_container_width=True)
+            if j.get("top_errors"):
+                st.plotly_chart(px.bar(pd.DataFrame(j["top_errors"]), x="code", y="count", title="Топ ошибок"), use_container_width=True)
+        with c2:
+            st.subheader("Последние проверки")
+            for it in j.get("last_checks",[]):
+                st.write(f"{status_badge(it['status'])} #{it['id']} {it['filename']} — {it['created_at'][:10] if it['created_at'] else ''}")
+            if j.get("last_run"):
+                lr=j["last_run"]
+                st.success(f"Active Learning: {lr['before']:.0%} → {lr['after']:.0%} ({lr['created_at'][:16]})")
+            st.subheader("Метрики")
+            m=j.get("metrics",{})
+            st.json({"uptime_h": j.get("uptime_hours"), "hit_rate": j.get("hit_rate"), "counters": m.get("counters",{})})
+        # Active Learning control
+        st.divider()
+        st.subheader("🤖 Active Learning замкнутый")
+        st.caption("Берёт 👎 из галереи, переиндексирует, меряет Hit Rate до/после")
+        c1,c2=st.columns(2)
+        with c1:
+            if st.button("🔄 Запустить цикл Active Learning"):
+                rr=api_post("/api/dashboard/active-learning/run", json={})
+                if rr: st.json(rr.json() if rr.status_code==200 else rr.text)
+        with c2:
+            r2=api_get("/api/dashboard/active-learning")
+            if r2 and r2.status_code==200:
+                st.dataframe(pd.DataFrame(r2.json().get("runs",[])), use_container_width=True)
+    else:
+        st.error("Дашборд недоступен — проверь API")
+
+elif page=="Загрузка":
     st.header("📤 Загрузка чертежа")
     st.info("Поддерживается PDF А0-А4. Система: 768px ресайз + кроп (штамп/ТТ/графика) → OCR ансамбль → Hybrid RAG (Qdrant) → Gemma-3-12B 4-bit → JSON + чек-лист. Дедeпликация по хэшу 5 мин.")
     col1,col2 = st.columns([2,1])
@@ -276,6 +347,73 @@ elif page=="Проверки":
                     st.error("Не найдено")
         else:
             st.info("Пока нет проверок — загрузите PDF")
+
+elif page=="Команда":
+    st.header("👥 Командная работа")
+    st.caption("Назначение, ревью (approve/reject), комментарии на bbox с @mention — всё в одном месте. Уведомления — пока в UI, далее Telegram/Email")
+    tab_a, tab_b, tab_c = st.tabs(["Мои задачи","Назначить","Комментарии"])
+    with tab_a:
+        r=api_get("/api/team/my/assignments")
+        if r and r.status_code==200:
+            items=r.json().get("items",[])
+            if items:
+                st.dataframe(pd.DataFrame(items), use_container_width=True)
+                sel=st.number_input("Открыть check_id из задач", min_value=0, step=1, key="my_check")
+                if sel:
+                    rr=api_get(f"/api/checks/{int(sel)}")
+                    if rr and rr.status_code==200:
+                        st.json(rr.json().get("summary",""))
+            else:
+                st.info("Нет назначений — попроси админа назначить")
+        # review
+        st.divider()
+        st.subheader("Ревью")
+        cid=st.number_input("Check ID для ревью", min_value=0, step=1, key="rev_cid")
+        decision=st.selectbox("Решение", ["in_review","approved","rejected"])
+        comm=st.text_input("Комментарий к ревью")
+        if st.button("Отправить ревью"):
+            rr=api_post(f"/api/team/checks/{int(cid)}/review", json={"decision":decision,"comment":comm})
+            st.json(rr.json() if rr and rr.status_code==200 else rr.text if rr else "error")
+    with tab_b:
+        if st.session_state.role not in ("admin","normocontroller"):
+            st.warning("Только admin/normocontroller может назначать")
+        else:
+            # list users
+            r=api_get("/api/admin/users")
+            users=[]
+            if r and r.status_code==200:
+                users=r.json().get("users",[])
+                st.dataframe(pd.DataFrame(users)[["id","username","role"]], use_container_width=True)
+            cid2=st.number_input("Check ID", min_value=0, step=1, key="assign_cid")
+            aid=st.number_input("Assignee user_id", min_value=0, step=1, key="aid")
+            note=st.text_input("Комментарий к назначению")
+            if st.button("Назначить"):
+                rr=api_post(f"/api/team/checks/{int(cid2)}/assign", json={"assignee_id": int(aid), "comment": note})
+                st.json(rr.json() if rr else {})
+            # show assignments for check
+            if cid2:
+                rr=api_get(f"/api/team/checks/{int(cid2)}/assignments")
+                if rr: st.json(rr.json())
+    with tab_c:
+        cid3=st.number_input("Check ID для комментариев", min_value=0, step=1, key="comm_cid")
+        if cid3:
+            # list comments
+            r=api_get(f"/api/team/checks/{int(cid3)}/comments")
+            if r and r.status_code==200:
+                for c in r.json().get("items",[]):
+                    st.write(f"**{c['author']}** @{','.join(c.get('mentions',[]))} — {c['text']} (стр {c.get('page_number')}, bbox {c.get('bbox')})")
+                    st.caption(str(c['created_at']))
+            st.divider()
+            st.subheader("Новый комментарий (с @mention и bbox)")
+            text=st.text_area("Текст, напр. @ivan проверь стрелку", key="comm_text")
+            pg=st.number_input("Страница", min_value=0, value=0, key="comm_pg")
+            bx_x=st.slider("bbox x", 0.0,1.0,0.2, key="bx_x")
+            bx_y=st.slider("bbox y", 0.0,1.0,0.2, key="bx_y")
+            bx_w=st.slider("bbox w", 0.0,1.0,0.08, key="bx_w")
+            bx_h=st.slider("bbox h", 0.0,1.0,0.08, key="bx_h")
+            if st.button("Отправить комментарий"):
+                rr=api_post(f"/api/team/checks/{int(cid3)}/comments", json={"text": text, "page_number": int(pg) if pg else None, "bbox": [bx_x,bx_y,bx_w,bx_h] if text else None})
+                st.json(rr.json() if rr else {})
 
 elif page=="ГОСТы":
     st.header("📚 База ГОСТов")
