@@ -3,27 +3,15 @@ MCP (Model Context Protocol) server for NormoScan.
 Exposes tools for external LLMs (Claude Desktop, Cursor etc) to use service.
 Implements JSON-RPC 2.0 over HTTP at /mcp
 Spec: https://spec.modelcontextprotocol.io/
-For simplicity, supports:
- - initialize
- - tools/list
- - tools/call
-Tools:
- - check_drawing(file_path, priority)
- - ask_gost(query)
- - ask_document(check_id, query)
- - search_gallery(query_image, top_k)
- - get_check_status(check_id)
 """
 from typing import Dict, Any, List
 import os, json, logging
-from fastapi import APIRouter, Request
+from fastapi import Request
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
 from .db import SessionLocal
 from .models.check import Check
 from .services.gost_ingest import search_gost
 from .services.rag_visual import visual_rag
-from .vector_store import vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +56,31 @@ TOOLS = [
     },
     {
         "name":"get_check_status",
-        "description":"Статус проверки по ID.",
+        "description":"Статус проверки по ID, прогресс, сводка.",
         "inputSchema":{
             "type":"object","properties":{"check_id":{"type":"integer"}},"required":["check_id"]
+        }
+    },
+    {
+        "name":"search_knowledge",
+        "description":"Поиск по базе знаний изделий (по обозначению, наименованию, материалу).",
+        "inputSchema":{
+            "type":"object","properties":{"query":{"type":"string"},"top_k":{"type":"integer","default":5}},
+            "required":["query"]
+        }
+    },
+    {
+        "name":"get_fix",
+        "description":"Получить подсказку по исправлению для конкретной ошибки.",
+        "inputSchema":{
+            "type":"object","properties":{"check_id":{"type":"integer"},"error_id":{"type":"string"}},"required":["check_id","error_id"]
+        }
+    },
+    {
+        "name":"get_metrics",
+        "description":"Метрики сервиса (очередь, VRAM, Hit Rate).",
+        "inputSchema":{
+            "type":"object","properties":{}
         }
     },
 ]
@@ -83,19 +93,14 @@ def tool_check_drawing(args: Dict) -> Dict:
         if check_id:
             c = db.query(Check).filter(Check.id==check_id).first()
             if not c: return {"error": f"check {check_id} not found"}
-            return {"check_id": c.id, "status": c.status, "summary": c.summary, "errors": c.errors_json}
+            return {"check_id": c.id, "status": c.status, "summary": c.summary, "errors": c.errors_json, "checklist": c.checklist_json}
         if file_path and os.path.exists(file_path):
-            # create check and enqueue
-            from .tasks import enqueue_check, process_check_sync
-            # if no DB, create
             c = Check(filename=os.path.basename(file_path), filepath=file_path, status="queued", priority=args.get("priority",5))
             db.add(c); db.commit(); db.refresh(c)
-            # try async
             try:
                 from .tasks import enqueue_check
                 enqueue_check(c.id, priority=c.priority)
-            except:
-                pass
+            except: pass
             return {"check_id": c.id, "status":"queued", "message": "Проверка поставлена в очередь"}
         return {"error": "Need file_path or check_id"}
     finally:
@@ -110,21 +115,20 @@ def tool_ask_document(args: Dict) -> Dict:
         c = db.query(Check).filter(Check.id==args["check_id"]).first()
         if not c:
             return {"error":"not found"}
-        # Simple QA over metadata+errors
         q = args["query"].lower()
         meta = c.meta_json or {}
         errs = c.errors_json or []
-        # naive keyword search
         if "масса" in q or "mass" in q:
             return {"answer": f"Масса: {meta.get('Масса','не указана')}", "meta": meta}
         if "обозначение" in q or "designation" in q:
             return {"answer": f"Обозначение: {meta.get('Обозначение')}", "meta": meta}
         if "ошибк" in q or "error" in q:
-            return {"answer": f"Найдено {len(errs)} ошибок: " + "; ".join([e.get('msg','') for e in errs[:5]]), "errors": errs}
+            return {"answer": f"Найдено {len(errs)} ошибок: " + "; ".join([e.get('msg','') for e in errs[:5]]), "errors": errs, "suggested_fixes": [e.get("suggested_fix") for e in errs[:3]]}
+        if "чеклист" in q or "checklist" in q:
+            return {"checklist": c.checklist_json}
         if "гост" in q:
             return {"answer": f"Документ проверен на соответствие, найденные коды: {set(e.get('code') for e in errs)}", "errors": errs}
-        # fallback: return summary
-        return {"answer": c.summary or "Документ проверен", "metadata": meta, "errors": errs}
+        return {"answer": c.summary or "Документ проверен", "metadata": meta, "errors": errs, "checklist": c.checklist_json}
     finally:
         db.close()
 
@@ -137,8 +141,31 @@ def tool_get_status(args: Dict) -> Dict:
     try:
         c=db.query(Check).filter(Check.id==args["check_id"]).first()
         if not c: return {"error":"not found"}
-        return {"check_id":c.id,"status":c.status,"pages_done":c.pages_done,"pages_total":c.pages_total,"summary":c.summary,"errors":c.errors_json}
+        return {"check_id":c.id,"status":c.status,"pages_done":c.pages_done,"pages_total":c.pages_total,"summary":c.summary,"errors":c.errors_json, "checklist": c.checklist_json}
     finally: db.close()
+
+def tool_search_knowledge(args: Dict) -> Dict:
+    from .services.analytics import search_knowledge_base
+    db=SessionLocal()
+    try:
+        res = search_knowledge_base(db, args["query"], top_k=args.get("top_k",5))
+        return {"query": args["query"], "results": res}
+    finally: db.close()
+
+def tool_get_fix(args: Dict) -> Dict:
+    db=SessionLocal()
+    try:
+        c=db.query(Check).filter(Check.id==args["check_id"]).first()
+        if not c: return {"error":"check not found"}
+        for e in (c.errors_json or []):
+            if e.get("id")==args["error_id"]:
+                return {"error_id": args["error_id"], "fix": e.get("suggested_fix"), "confidence": e.get("fix_confidence")}
+        return {"error":"error_id not found"}
+    finally: db.close()
+
+def tool_get_metrics(args: Dict) -> Dict:
+    from .core.metrics import metrics
+    return metrics.snapshot()
 
 TOOL_IMPL = {
     "check_drawing": tool_check_drawing,
@@ -146,6 +173,9 @@ TOOL_IMPL = {
     "ask_document": tool_ask_document,
     "search_gallery": tool_search_gallery,
     "get_check_status": tool_get_status,
+    "search_knowledge": tool_search_knowledge,
+    "get_fix": tool_get_fix,
+    "get_metrics": tool_get_metrics,
 }
 
 async def handle_mcp(request: Request):
@@ -154,13 +184,12 @@ async def handle_mcp(request: Request):
     except:
         return JSONResponse({"jsonrpc":"2.0","error":{"code":-32700,"message":"Parse error"},"id":None})
 
-    # Support both single and batch
     def handle_one(msg: Dict) -> Dict:
         mid = msg.get("id")
         method = msg.get("method")
         params = msg.get("params",{})
         if method=="initialize":
-            return {"jsonrpc":"2.0","id":mid,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"normoscan-mcp","version":"1.0.0"}}}
+            return {"jsonrpc":"2.0","id":mid,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"normoscan-mcp","version":"1.1.0"}}}
         if method=="tools/list":
             return {"jsonrpc":"2.0","id":mid,"result":{"tools": TOOLS}}
         if method=="tools/call":
@@ -185,6 +214,5 @@ async def handle_mcp(request: Request):
     else:
         return JSONResponse(handle_one(body))
 
-# Also expose SSE/HTTP for simple tool discovery (GET /mcp)
 def mcp_info():
-    return {"name":"normoscan-mcp","version":"1.0.0","tools":[t["name"] for t in TOOLS],"protocol":"2024-11-05"}
+    return {"name":"normoscan-mcp","version":"1.1.0","tools":[t["name"] for t in TOOLS],"protocol":"2024-11-05"}
