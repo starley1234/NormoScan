@@ -9,13 +9,10 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 def _hash_embedding(text: str, dim: int = 384) -> list[float]:
-    # Deterministic mock embedding for dev/tests; replace with sentence-transformers in prod
     h = hashlib.sha256(text.encode()).digest()
-    # expand to dim via lặp
     vals = []
     for i in range(dim):
-        vals.append( ((h[i % len(h)] + i*31) % 256) / 255.0 - 0.5 )
-    # normalize
+        vals.append(((h[i % len(h)] + i*31) % 256) / 255.0 - 0.5)
     norm = math.sqrt(sum(v*v for v in vals)) or 1
     return [v/norm for v in vals]
 
@@ -36,7 +33,6 @@ class MemoryVectorStore(BaseVectorStore):
     def embed_text(self, text: str) -> list[float]:
         try:
             from sentence_transformers import SentenceTransformer
-            # lazy load only if available and not mock
             if settings.vector_db != "memory":
                 m = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
                 return m.encode(text).tolist()
@@ -45,18 +41,20 @@ class MemoryVectorStore(BaseVectorStore):
         return _hash_embedding(text, self.dim)
 
     def embed_image(self, image_path: str) -> list[float]:
-        # Use hash of path + file bytes if exists
         try:
             with open(image_path,"rb") as f:
                 data = f.read(2048)
             return _hash_embedding(data.hex()[:500], self.dim)
-        except:
+        except Exception:
             return _hash_embedding(image_path, self.dim)
 
     def upsert(self, collection: str, points: list[dict]):
+        if not points:
+            if collection not in self.store:
+                self.store[collection]=[]
+            return
         if collection not in self.store:
             self.store[collection]=[]
-        # replace by id
         existing = {p["id"]:p for p in self.store[collection]}
         for p in points:
             existing[p["id"]] = p
@@ -67,7 +65,6 @@ class MemoryVectorStore(BaseVectorStore):
         scored=[]
         for p in pts:
             if filter:
-                # simple dict match
                 ok=True
                 for k,v in filter.items():
                     if p.get("payload",{}).get(k)!=v:
@@ -88,7 +85,6 @@ class QdrantVectorStore(BaseVectorStore):
         self._Distance = Distance
         self._VectorParams = VectorParams
         self.fallback = MemoryVectorStore()
-        self._checked = False
 
     def _ensure_collection(self, name: str):
         try:
@@ -105,6 +101,12 @@ class QdrantVectorStore(BaseVectorStore):
         return self.fallback.embed_image(image_path)
 
     def upsert(self, collection: str, points: list[dict]):
+        if not points:
+            try:
+                self._ensure_collection(collection)
+            except:
+                pass
+            return
         try:
             self._ensure_collection(collection)
             qpoints=[]
@@ -118,7 +120,6 @@ class QdrantVectorStore(BaseVectorStore):
     def search(self, collection: str, query_vector: list[float], top_k: int=5, filter: dict | None=None) -> list[dict]:
         try:
             self._ensure_collection(collection)
-            # Qdrant filter not implemented for brevity
             res = self.client.search(collection_name=collection, query_vector=query_vector, limit=top_k)
             return [{"id":r.id,"score":r.score,"payload":r.payload} for r in res]
         except Exception as e:
@@ -132,12 +133,10 @@ def get_vector_store() -> BaseVectorStore:
         except Exception:
             return MemoryVectorStore()
     elif settings.vector_db == "milvus":
-        # Milvus similar; for now fallback
         return MemoryVectorStore()
     else:
         return MemoryVectorStore()
 
-# singleton
 _vector_store: BaseVectorStore | None = None
 def vector_store() -> BaseVectorStore:
     global _vector_store
@@ -145,10 +144,14 @@ def vector_store() -> BaseVectorStore:
         _vector_store = get_vector_store()
     return _vector_store
 
-# Helpers for app
 def ensure_collections():
     vs = vector_store()
     for coll in ["gosts_text","gallery_visual","checks_meta"]:
         try:
-            vs.upsert(coll, [])
-        except: pass
+            if isinstance(vs, QdrantVectorStore):
+                vs._ensure_collection(coll)
+            else:
+                if coll not in vs.store:
+                    vs.store[coll]=[]
+        except Exception:
+            pass

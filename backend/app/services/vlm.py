@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import os
 import random
 import re
 from typing import Any
@@ -201,7 +202,13 @@ class VLMService:
             return
         # API branch (vLLM / OpenAI-совместимый) — локальная модель не грузится
         if self.engine in ("vllm", "openai"):
-            url = settings.vlm_api_url or "http://localhost:8001/v1"
+            raw = (settings.vlm_api_url or "http://localhost:8001/v1").strip()
+            # очистка от markdown
+            raw = raw.strip().strip("[]()")
+            import re as _re
+            ms=_re.findall(r"https?://[^\s\]\)]+", raw)
+            if ms: raw=ms[-1]
+            url = raw.rstrip("/") if raw else "http://localhost:8001/v1"
             logger.info(f"VLM API mode: {self.model_name} engine={self.engine} url={url} key={'***' if settings.vlm_api_key else 'none'}")
             self._loaded=True
             return
