@@ -1,7 +1,7 @@
-from typing import Dict, Any, List
-import re
+from typing import Dict, Any, List, Optional
+import re, json
+from sqlalchemy.orm import Session
 
-# JSON schema for metadata (настраиваемый шаблон)
 DEFAULT_SCHEMA = {
     "type":"object",
     "properties":{
@@ -18,19 +18,33 @@ DEFAULT_SCHEMA = {
     "required":["Обозначение","Наименование"]
 }
 
+def get_active_schema(db: Optional[Session]=None) -> Dict:
+    if db is None:
+        return DEFAULT_SCHEMA
+    try:
+        from ..models.app_settings import MetadataSchema
+        s = db.query(MetadataSchema).filter(MetadataSchema.is_active==True).first()
+        if s and s.schema_json:
+            return s.schema_json
+    except: pass
+    return DEFAULT_SCHEMA
+
 def validate_metadata(meta: Dict[str,Any], schema: Dict=DEFAULT_SCHEMA) -> List[Dict]:
     errors=[]
     for req in schema.get("required",[]):
         if not meta.get(req):
             errors.append({"field":req,"msg":f"Отсутствует обязательное поле {req}","code":"ГОСТ 2.104"})
-    # simple enum check
     for field, prop in schema.get("properties",{}).items():
         if "enum" in prop and meta.get(field) and meta[field] not in prop["enum"]:
             errors.append({"field":field,"msg":f"Недопустимое значение {meta[field]} для {field}","code":"schema"})
+        if "pattern" in prop and meta.get(field):
+            try:
+                if not re.match(prop["pattern"], str(meta[field])):
+                    errors.append({"field":field,"msg":f"Поле {field} не соответствует шаблону {prop['pattern']}","code":"schema"})
+            except: pass
     return errors
 
 def consistency_check(pages_meta: List[Dict[str,Any]]) -> Dict[str,Any]:
-    """Сверка метаданных между листами одного комплекта"""
     if not pages_meta:
         return {"consistent": True, "issues":[]}
     base = pages_meta[0]
@@ -50,10 +64,9 @@ def consistency_check(pages_meta: List[Dict[str,Any]]) -> Dict[str,Any]:
                 })
     return {"consistent": len(issues)==0, "issues": issues, "base": base}
 
-def extract_all_technical_metadata(ocr_text: str, vlm_meta: Dict) -> Dict[str,Any]:
-    # Merge OCR + VLM, plus extra fields
+def extract_all_technical_metadata(ocr_text: str, vlm_meta: Dict, db: Session=None) -> Dict[str,Any]:
+    schema = get_active_schema(db)
     meta = dict(vlm_meta or {})
-    # Try to enrich from OCR
     patterns = {
         "Обозначение": r"Обозначение[:\s]*([A-ZА-Я0-9\.\-\s]+)",
         "Наименование": r"Наименование[:\s]*([A-Za-zА-Яа-я0-9\-\s]+)",
@@ -66,7 +79,6 @@ def extract_all_technical_metadata(ocr_text: str, vlm_meta: Dict) -> Dict[str,An
             m = re.search(pat, ocr_text, re.IGNORECASE)
             if m:
                 meta[k]=m.group(1).strip().split("\n")[0]
-    # Knowledge base fields
     kb = {
         "designation": meta.get("Обозначение"),
         "name": meta.get("Наименование"),
@@ -76,4 +88,26 @@ def extract_all_technical_metadata(ocr_text: str, vlm_meta: Dict) -> Dict[str,An
         "scale": meta.get("Масштаб"),
         "format": meta.get("Формат"),
     }
-    return {"metadata": meta, "kb": kb, "validation": validate_metadata(meta)}
+    return {"metadata": meta, "kb": kb, "validation": validate_metadata(meta, schema), "schema": schema}
+
+def create_or_update_schema(db: Session, name: str, schema_json: Dict, title: str=None, make_active: bool=True, created_by: int=None):
+    from ..models.app_settings import MetadataSchema
+    existing = db.query(MetadataSchema).filter(MetadataSchema.name==name).first()
+    if existing:
+        existing.schema_json=schema_json
+        if title: existing.title=title
+        existing.is_active=make_active
+    else:
+        existing = MetadataSchema(name=name, title=title or name, schema_json=schema_json, is_active=make_active, created_by=created_by)
+        db.add(existing)
+    if make_active:
+        # deactivate others
+        for s in db.query(MetadataSchema).filter(MetadataSchema.name!=name).all():
+            s.is_active=False
+    db.commit()
+    db.refresh(existing)
+    return existing
+
+def list_schemas(db: Session):
+    from ..models.app_settings import MetadataSchema
+    return db.query(MetadataSchema).order_by(MetadataSchema.created_at.desc()).all()

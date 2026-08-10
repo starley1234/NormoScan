@@ -22,6 +22,7 @@ class Settings(BaseSettings):
 
     vlm_model: str = Field(default="google/gemma-3-12b-it", validation_alias="VLM_MODEL")
     vlm_quantization: Literal["awq-4bit","gptq-4bit","int8","fp16","mock"] = Field(default="mock", validation_alias="VLM_QUANTIZATION")
+    vlm_engine: Literal["transformers","vllm","mock"] = Field(default="mock", validation_alias="VLM_ENGINE")
     vlm_device: str = Field(default="cuda", validation_alias="VLM_DEVICE")
     max_context_window: int = Field(default=8192, validation_alias="MAX_CONTEXT_WINDOW")
     image_width: int = Field(default=768, validation_alias="IMAGE_WIDTH")
@@ -30,6 +31,8 @@ class Settings(BaseSettings):
     max_concurrent_vlm: int = Field(default=1, validation_alias="MAX_CONCURRENT_VLM")
 
     ocr_engine: Literal["easyocr","paddleocr","mock"] = Field(default="mock", validation_alias="OCR_ENGINE")
+    ocr_ensemble: bool = Field(default=True, validation_alias="OCR_ENSEMBLE")
+    ocr_fallback_threshold: float = Field(default=0.7, validation_alias="OCR_FALLBACK_THRESHOLD")
 
     storage_path: str = Field(default="./storage", validation_alias="STORAGE_PATH")
     gosts_path: str = Field(default="./storage/gosts", validation_alias="GOSTS_PATH")
@@ -45,6 +48,12 @@ class Settings(BaseSettings):
     cors_origins: str = Field(default="*", validation_alias="CORS_ORIGINS")
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
 
+    # Observability / Reliability
+    enable_metrics: bool = Field(default=True, validation_alias="ENABLE_METRICS")
+    dedupe_window_minutes: int = Field(default=5, validation_alias="DEDUPE_WINDOW_MINUTES")
+    queue_max_retries: int = Field(default=3, validation_alias="QUEUE_MAX_RETRIES")
+    enable_sse: bool = Field(default=True, validation_alias="ENABLE_SSE")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -54,9 +63,7 @@ class Settings(BaseSettings):
         return self.database_url.startswith("sqlite")
 
     def effective_vector_db(self) -> str:
-        # fallback to memory if external not reachable in dev
         if self.app_env == "development" and self.vector_db in ("qdrant","milvus"):
-            # keep as configured, but runtime will fallback if connection fails
             return self.vector_db
         return self.vector_db
 
@@ -67,5 +74,5 @@ def get_settings() -> Settings:
 settings = get_settings()
 
 # Ensure storage dirs
-for p in [settings.storage_path, settings.gosts_path, settings.gallery_path, os.path.join(settings.storage_path, "uploads"), os.path.join(settings.storage_path, "checks")]:
+for p in [settings.storage_path, settings.gosts_path, settings.gallery_path, os.path.join(settings.storage_path, "uploads"), os.path.join(settings.storage_path, "checks"), os.path.join(settings.storage_path, "retrain")]:
     os.makedirs(p, exist_ok=True)
