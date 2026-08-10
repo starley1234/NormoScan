@@ -239,3 +239,62 @@ def backup(db: Session=Depends(get_db), user: User=Depends(get_current_user)):
     if not os.path.exists(path):
         raise HTTPException(500, "Backup failed")
     return FileResponse(path, filename=os.path.basename(path), media_type="application/gzip")
+
+@router.get("/logs", summary="Логи приложения (из памяти + файл)")
+def get_logs(lines: int=200, level: str=None, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role not in ("admin","normocontroller"):
+        raise HTTPException(403, "Forbidden")
+    from ..core.log_buffer import get_buffer
+    import os
+    buf = get_buffer()
+    if level:
+        buf = [b for b in buf if b["level"]==level.upper()]
+    # также читаем файл логов если есть
+    file_logs=[]
+    try:
+        log_path=os.path.join("storage","logs","app.log")
+        if os.path.exists(log_path):
+            with open(log_path,"r",encoding="utf-8",errors="ignore") as f:
+                file_logs=f.read().splitlines()[-lines:]
+    except: pass
+    return {"buffer": buf[-lines:], "file_tail": file_logs, "total_buffer": len(buf), "config": {"vlm_model": settings.vlm_model, "vlm_engine": settings.vlm_engine, "vlm_api_url": settings.vlm_api_url, "has_key": bool(settings.vlm_api_key)}}
+
+@router.post("/logs/clear", summary="Очистить буфер логов")
+def clear_logs(user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    from ..core.log_buffer import clear_buffer
+    clear_buffer()
+    return {"status":"cleared"}
+
+@router.post("/vlm/test", summary="Тест вызова внешнего VLM (для диагностики)")
+def test_vlm(prompt: str="Тест нормоконтроля: ответь OK", db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    import tempfile, os, time
+    from PIL import Image
+    from ..services.vlm import vlm_service
+    # создаём тестовую картинку 1x1
+    tmp = tempfile.mktemp(suffix=".png")
+    Image.new("RGB",(64,64),color="white").save(tmp)
+    start=time.time()
+    # пробуем вызвать VLM через настроенный engine/api
+    try:
+        # форсируем engine openai/vllm если указан URL, иначе mock
+        orig_engine=vlm_service.engine
+        if settings.vlm_api_url and settings.vlm_engine=="mock":
+            vlm_service.engine="openai"
+        res = vlm_service.analyze_page(tmp, "Обозначение ТЕСТ Наименование Тест", text_hits=[], visual_hint=None, page_number=1, summary_prev="", ocr_confidence=0.9)
+        elapsed=round(time.time()-start,2)
+        # логи
+        from ..core.log_buffer import get_buffer
+        logs=get_buffer()[-20:]
+        # чистим tmp
+        try: os.remove(tmp)
+        except: pass
+        # восстановить engine
+        vlm_service.engine=orig_engine
+        return {"elapsed": elapsed, "result": res, "vlm_config": {"model": settings.vlm_model, "engine": settings.vlm_engine, "api_url": settings.vlm_api_url, "has_key": bool(settings.vlm_api_key)}, "logs": logs}
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc(), "vlm_config": {"model": settings.vlm_model, "engine": settings.vlm_engine, "api_url": settings.vlm_api_url}}

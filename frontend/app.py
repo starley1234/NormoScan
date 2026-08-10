@@ -155,7 +155,7 @@ with st.sidebar:
             st.session_state.token=None
             st.rerun()
         st.divider()
-        page = st.radio("Навигация", ["Дашборд","Загрузка","Проверки","Команда","ГОСТы","Галерея","База знаний","Аналитика","Админка","MCP","Метрики"], index=0, key="nav_radio")
+        page = st.radio("Навигация", ["Дашборд","Загрузка","Проверки","Команда","ГОСТы","Галерея","База знаний","Аналитика","Админка","MCP","Метрики","Логи"], index=0, key="nav_radio")
         st.divider()
         st.caption(f"API (внутренний): {API}")
         st.caption(f"API (внешний): {API_EXTERNAL}")
@@ -810,3 +810,55 @@ elif page=="Метрики":
     rp=requests.get(f"{API}/metrics", headers=auth_header())
     if rp.status_code==200:
         st.code(rp.text, language="bash")
+
+elif page=="Логи":
+    st.header("📜 Логи и диагностика VLM")
+    st.caption("Здесь можно проверить вызовы внешнего VLM и скопировать логи для отправки разработчику. Логи хранятся в памяти (2000 строк) + файл storage/logs/app.log")
+    col1,col2 = st.columns([2,1])
+    with col1:
+        lines=st.slider("Строк", 20, 500, 100, key="log_lines")
+        level=st.selectbox("Уровень", ["", "INFO","WARNING","ERROR"])
+        if st.button("🔄 Обновить логи"):
+            st.rerun()
+        r=api_get(f"/api/admin/logs?lines={lines}" + (f"&level={level}" if level else ""))
+        if r and r.status_code==200:
+            j=r.json()
+            st.subheader("Буфер (память)")
+            for item in j.get("buffer",[])[-lines:]:
+                st.text(f"{item['ts']} {item['level']} {item['logger']}: {item['msg']}")
+            if j.get("file_tail"):
+                st.subheader("Файл storage/logs/app.log — хвост")
+                st.code("\n".join(j["file_tail"]), language="bash")
+            st.json({"config": j.get("config"), "total_buffer": j.get("total_buffer")})
+            if st.button("📋 Копировать буфер в буфер обмена (JSON)"):
+                st.code(json.dumps(j.get("buffer",[]), ensure_ascii=False, indent=2)[:5000])
+        else:
+            st.error(r.text if r else "API недоступен")
+            st.info(f"Проверь что API доступен: {API}/health и что ты админ ({st.session_state.role})")
+    with col2:
+        st.subheader("🧪 Тест VLM")
+        st.caption("Делает тестовый вызов к внешнему VLM (берёт VLM_API_URL/KEY из .env) и показывает логи. Используй чтобы проверить llm.tool.ru")
+        prompt=st.text_area("Промпт", value="Тест нормоконтроля: ответь OK", height=80)
+        if st.button("🚀 Тест VLM", type="primary"):
+            with st.spinner("Вызов VLM..."):
+                r=api_post(f"/api/admin/vlm/test?prompt={prompt}", json={})
+                if r and r.status_code==200:
+                    j=r.json()
+                    st.success(f"Elapsed {j.get('elapsed')}s")
+                    st.json(j.get("result",{}))
+                    st.subheader("VLM конфиг")
+                    st.json(j.get("vlm_config"))
+                    st.subheader("Последние логи")
+                    for lg in j.get("logs",[])[-10:]:
+                        st.text(f"{lg.get('ts')} {lg.get('level')} {lg.get('msg')}")
+                    if j.get("error"):
+                        st.error(j["error"])
+                        st.code(j.get("traceback",""))
+                else:
+                    st.error(r.text if r else "Ошибка")
+        st.divider()
+        st.subheader("Очистка")
+        if st.button("🗑️ Очистить буфер"):
+            r=api_post("/api/admin/logs/clear", json={})
+            st.json(r.json() if r else {})
+        st.info("Логи также в `docker logs normoscan-backend -f` и `docker compose logs backend`")

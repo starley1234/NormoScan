@@ -34,3 +34,9 @@ def setup_logging():
     # quiet noisy libs
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("PIL").setLevel(logging.WARNING)
+    # буфер для UI логов
+    try:
+        from .log_buffer import _handler, attach_to_root
+        attach_to_root()
+    except:
+        pass

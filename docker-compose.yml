@@ -22,9 +22,9 @@ services:
       context: ./backend
       args:
         WITH_VLM: "false"
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: sh -c "uvicorn app.main:app --host 0.0.0.0 --port $${API_PORT:-8000} --reload"
     volumes: [./backend:/app, ./storage:/app/storage]
-    ports: ["${API_PORT:-8000}:8000"]
+    ports: ["${API_PORT:-8000}:${API_PORT:-8000}"]
     depends_on: [postgres, redis, qdrant]
     environment:
       DATABASE_URL: postgresql+psycopg://normoscan:normoscan@postgres:5432/normoscan
@@ -39,6 +39,7 @@ services:
       VLM_API_URL: ${VLM_API_URL-}
       VLM_API_KEY: ${VLM_API_KEY-}
       MAX_CONTEXT_WINDOW: 8192
+      API_PORT: ${API_PORT:-8000}
     env_file: [.env]
 
   celery_worker:
@@ -63,7 +64,7 @@ services:
     ports: ["${FRONTEND_PORT:-8501}:8501"]
     volumes: [./frontend:/app]
     environment:
-      API_URL: http://backend:8000
+      API_URL: http://backend:${API_PORT:-8000}
       API_PORT: ${API_PORT:-8000}
       FRONTEND_PORT: ${FRONTEND_PORT:-8501}
     depends_on: [backend]
