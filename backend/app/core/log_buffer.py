@@ -42,3 +42,18 @@ def attach_to_root():
 
 def clear_buffer():
     _buffer.clear()
+    # также чистим файл
+    try:
+        log_path = os.path.join("storage", "logs", "app.log")
+        if os.path.exists(log_path):
+            open(log_path, "w").close()
+    except:
+        pass
+
+def clear_file():
+    try:
+        log_path = os.path.join("storage", "logs", "app.log")
+        if os.path.exists(log_path):
+            open(log_path, "w").close()
+    except:
+        pass
