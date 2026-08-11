@@ -4,13 +4,13 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: '0.0.0.0',
-    port: 3000,
+    port: 8501,
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/mcp': 'http://localhost:8000',
-      '/health': 'http://localhost:8000',
-      '/docs': 'http://localhost:8000',
-      '/openapi.json': 'http://localhost:8000'
+      '/api': { target: 'http://localhost:8000', changeOrigin: true },
+      '/health': { target: 'http://localhost:8000', changeOrigin: true },
+      '/mcp': { target: 'http://localhost:8000', changeOrigin: true },
+      '/docs': { target: 'http://localhost:8000', changeOrigin: true },
+      '/openapi.json': { target: 'http://localhost:8000', changeOrigin: true }
     }
   }
 })
