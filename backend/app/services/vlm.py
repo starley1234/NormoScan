@@ -264,8 +264,14 @@ class VLMService:
                 logger.warning(f"VLM_API_KEY пустой/placeholder — запрос без ключа к {url}")
             with open(image_path,"rb") as f:
                 b64 = base64.b64encode(f.read()).decode()
+            # чистим префикс openai/ для LM Studio
+            model_clean = self.model_name
+            if hasattr(model_clean, "removeprefix"):
+                model_clean = model_clean.removeprefix("openai/").removeprefix("vllm/")
+            else:
+                model_clean = model_clean.replace("openai/","").replace("vllm/","")
             payload = {
-                "model": self.model_name,
+                "model": model_clean,
                 "messages": [{"role":"user","content":[
                     {"type":"text","text": prompt},
                     {"type":"image_url","image_url":{"url": f"data:image/png;base64,{b64}"}}
@@ -273,7 +279,7 @@ class VLMService:
                 "max_tokens": 1024,
                 "temperature": 0.2,
             }
-            logger.info(f"VLM запрос → {url} model={self.model_name} engine={self.engine} prompt={len(prompt)} chars image={os.path.basename(image_path)}")
+            logger.info(f"VLM запрос → {url} model={model_clean} engine={self.engine} prompt={len(prompt)} chars image={os.path.basename(image_path)}")
             resp = requests.post(url, json=payload, headers=headers, timeout=30)
             logger.info(f"VLM ответ ← {url} status={resp.status_code} bytes={len(resp.content)}")
             resp.raise_for_status()

@@ -110,7 +110,9 @@ def _process_check_logic(check_id: int):
                 if m:
                     try: vis_sim=int(m.group(1))/100
                     except: pass
+            logger.info(f"Tasks VLM → check {check_id} page {page_num} engine={vlm_service.engine} quant={vlm_service.quant} url={settings.vlm_api_url} ocr_conf={ocr_conf:.2f} has_key={bool(settings.vlm_api_key)}")
             vlm_out = vlm_service.analyze_page(img_path, ocr_text, text_hits=text_hits, visual_hint=visual_hint, page_number=page_num, summary_prev=summary_prev, ocr_confidence=ocr_conf, visual_sim=vis_sim)
+            logger.info(f"Tasks VLM ← check {check_id} page {page_num} conf={vlm_out.get('confidence')} errors={len(vlm_out.get('errors',[]))} model={vlm_out.get('model')}")
             summary_prev = vlm_out.get("summary", summary_prev)
 
             # Save page result
