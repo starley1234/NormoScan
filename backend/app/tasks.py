@@ -276,6 +276,23 @@ try:
                 process_check.delay(check_id)
             metrics.inc("normoscan_enqueued", labels={"priority": str(priority)})
             logger.info(f"Enqueued check {check_id} to Celery priority={priority}")
+            # watchdog: если через 10с всё ещё queued — форсим sync (воркер мог упасть)
+            def _watchdog(cid):
+                import time
+                time.sleep(10)
+                try:
+                    db = SessionLocal()
+                    c = db.query(Check).filter(Check.id==cid).first()
+                    if c and c.status=="queued":
+                        logger.warning(f"Watchdog: check {cid} still queued after 10s, forcing sync")
+                        db.close()
+                        _process_check_logic(cid)
+                    else:
+                        db.close()
+                except Exception as e:
+                    logger.debug(f"Watchdog failed {e}")
+            import threading
+            threading.Thread(target=_watchdog, args=(check_id,), daemon=True).start()
             return True
         except Exception as e:
             logger.warning(f"Celery enqueue failed, running eager: {e}")

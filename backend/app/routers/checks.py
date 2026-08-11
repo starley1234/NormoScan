@@ -117,6 +117,18 @@ def retry_check(check_id: int, db: Session=Depends(get_db), user: User=Depends(g
     enqueue_check(c.id, priority=c.priority)
     return {"status":"queued"}
 
+@router.post("/{check_id}/force-sync", summary="Форсировать синхронную обработку (если зависло в queued)")
+def force_sync(check_id: int, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    c = db.query(Check).filter(Check.id==check_id).first()
+    if not c: raise HTTPException(404, "Not found")
+    # сбросим статус и запустим синхронно в фоне
+    c.status="queued"
+    db.commit()
+    import threading
+    from ..tasks import process_check_sync
+    threading.Thread(target=process_check_sync, args=(check_id,), daemon=True).start()
+    return {"status":"forced_sync", "check_id": check_id}
+
 @router.get("/{check_id}/report")
 def report(check_id: int, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
     c = db.query(Check).filter(Check.id==check_id).first()

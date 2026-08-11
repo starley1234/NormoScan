@@ -387,9 +387,19 @@ elif page=="Проверки":
                         if st.button("Показать аннотации JSON"):
                             st.json(ann_data)
                     if d["status"] in ("queued","processing"):
-                        if st.button("📡 Следить (SSE)"):
-                            st.info("SSE стрим: /api/checks/{id}/stream — polling fallback")
-                            bar=st.progress(d["pages_done"]/max(d["pages_total"],1))
+                        col_sse, col_force = st.columns(2)
+                        with col_sse:
+                            if st.button("📡 Следить (SSE)"):
+                                st.info("SSE стрим: /api/checks/{id}/stream — polling fallback")
+                                bar=st.progress(d["pages_done"]/max(d["pages_total"],1))
+                        with col_force:
+                            if st.button("⚡ Форсировать sync (если зависло)", help="Запустит проверку синхронно, обходя Celery"):
+                                r = api_post(f"/api/checks/{d['id']}/force-sync", json={})
+                                if r and r.status_code==200:
+                                    st.success("Запущено синхронно — обновите через 3с")
+                                    st.json(r.json())
+                                else:
+                                    st.error(r.text if r else "Ошибка")
                 else:
                     st.error("Не найдено")
         else:
