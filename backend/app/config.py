@@ -2,7 +2,7 @@ import os
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -57,6 +57,47 @@ class Settings(BaseSettings):
     dedupe_window_minutes: int = Field(default=5, validation_alias="DEDUPE_WINDOW_MINUTES")
     queue_max_retries: int = Field(default=3, validation_alias="QUEUE_MAX_RETRIES")
     enable_sse: bool = Field(default=True, validation_alias="ENABLE_SSE")
+
+    @field_validator("vlm_api_url", mode="before")
+    @classmethod
+    def _clean_vlm_url(cls, v):
+        if not v or not isinstance(v, str):
+            return None
+        v = v.strip()
+        if not v or v in ("", "null", "None"):
+            return None
+        # убери markdown [url](url) и скобки
+        # берём последний https://
+        import re
+        # если markdown вида [text](url) — вытаскиваем url из скобок
+        # ищем все URL
+        urls = re.findall(r"https?://[^\s\]\)\"']+", v)
+        if urls:
+            return urls[-1].strip().rstrip(".,)")
+        # иначе просто чистим скобки
+        return v.strip().strip("[]()").strip()
+
+    @field_validator("vlm_model", mode="before")
+    @classmethod
+    def _clean_vlm_model(cls, v):
+        if not v or not isinstance(v, str):
+            return v
+        v = v.strip()
+        # убери префикс openai/ / vllm/ — LM Studio хочет чистое имя
+        for p in ("openai/", "vllm/", "openai:", "vllm:"):
+            if v.startswith(p):
+                v = v[len(p):]
+        return v.strip()
+
+    @field_validator("vlm_api_key", mode="before")
+    @classmethod
+    def _clean_key(cls, v):
+        if not v or not isinstance(v, str):
+            return None
+        v = v.strip()
+        if not v or v in ("sk-", "sk", "null", "None", '""', "''"):
+            return None
+        return v
 
     model_config = ConfigDict(
         env_file=".env",

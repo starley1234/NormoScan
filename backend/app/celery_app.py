@@ -2,6 +2,13 @@ from celery import Celery
 
 from .config import settings
 
+# логи в файл и буфер как у backend — чтобы UI Логи видел celery
+try:
+    from .core.logging import setup_logging
+    setup_logging()
+except:
+    pass
+
 celery_app = Celery(
     "normoscan",
     broker=settings.celery_broker_url,

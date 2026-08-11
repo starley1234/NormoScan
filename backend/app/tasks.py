@@ -242,9 +242,29 @@ try:
             logger.debug(f"Redis unavailable: {e}")
             return False
 
+    def _celery_has_workers(timeout: float=1.0) -> bool:
+        try:
+            # ping workers — если нет ответа, считаем что воркеров нет
+            insp = celery_app.control.inspect(timeout=timeout)
+            active = insp.active()
+            # active вернёт None если нет воркеров
+            if not active:
+                logger.warning("Celery: no active workers detected (inspect returned None)")
+                return False
+            # даже если active == {}, воркер есть но idle — считаем живым
+            return True
+        except Exception as e:
+            logger.debug(f"Celery workers check failed: {e}")
+            return False
+
     def enqueue_check(check_id: int, priority: int=5):
         if not _redis_available():
             logger.info(f"Redis not available, running check {check_id} synchronously (priority {priority})")
+            _process_check_logic(check_id)
+            return False
+        # если Redis есть, но воркеров нет — фолбэк в sync чтобы не висело в queued
+        if not _celery_has_workers():
+            logger.warning(f"Celery workers not available, running check {check_id} synchronously (fallback)")
             _process_check_logic(check_id)
             return False
         try:
@@ -255,6 +275,7 @@ try:
             else:
                 process_check.delay(check_id)
             metrics.inc("normoscan_enqueued", labels={"priority": str(priority)})
+            logger.info(f"Enqueued check {check_id} to Celery priority={priority}")
             return True
         except Exception as e:
             logger.warning(f"Celery enqueue failed, running eager: {e}")
