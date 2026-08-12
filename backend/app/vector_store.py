@@ -1,0 +1,157 @@
+import hashlib
+import logging
+import math
+
+import numpy as np
+
+from .config import settings
+
+logger = logging.getLogger(__name__)
+
+def _hash_embedding(text: str, dim: int = 384) -> list[float]:
+    h = hashlib.sha256(text.encode()).digest()
+    vals = []
+    for i in range(dim):
+        vals.append(((h[i % len(h)] + i*31) % 256) / 255.0 - 0.5)
+    norm = math.sqrt(sum(v*v for v in vals)) or 1
+    return [v/norm for v in vals]
+
+def cosine(a: list[float], b: list[float]) -> float:
+    return float(np.dot(a,b) / (np.linalg.norm(a)*np.linalg.norm(b) + 1e-9))
+
+class BaseVectorStore:
+    def upsert(self, collection: str, points: list[dict]): raise NotImplementedError
+    def search(self, collection: str, query_vector: list[float], top_k: int =5, filter: dict | None=None) -> list[dict]: raise NotImplementedError
+    def embed_text(self, text: str) -> list[float]: raise NotImplementedError
+    def embed_image(self, image_path: str) -> list[float]: raise NotImplementedError
+
+class MemoryVectorStore(BaseVectorStore):
+    def __init__(self):
+        self.store: dict[str, list[dict]] = {}
+        self.dim = 384
+
+    def embed_text(self, text: str) -> list[float]:
+        try:
+            from sentence_transformers import SentenceTransformer
+            if settings.vector_db != "memory":
+                m = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+                return m.encode(text).tolist()
+        except Exception as e:
+            logger.debug(f"fallback hash embedding: {e}")
+        return _hash_embedding(text, self.dim)
+
+    def embed_image(self, image_path: str) -> list[float]:
+        try:
+            with open(image_path,"rb") as f:
+                data = f.read(2048)
+            return _hash_embedding(data.hex()[:500], self.dim)
+        except Exception:
+            return _hash_embedding(image_path, self.dim)
+
+    def upsert(self, collection: str, points: list[dict]):
+        if not points:
+            if collection not in self.store:
+                self.store[collection]=[]
+            return
+        if collection not in self.store:
+            self.store[collection]=[]
+        existing = {p["id"]:p for p in self.store[collection]}
+        for p in points:
+            existing[p["id"]] = p
+        self.store[collection] = list(existing.values())
+
+    def search(self, collection: str, query_vector: list[float], top_k: int=5, filter: dict | None=None) -> list[dict]:
+        pts = self.store.get(collection, [])
+        scored=[]
+        for p in pts:
+            if filter:
+                ok=True
+                for k,v in filter.items():
+                    if p.get("payload",{}).get(k)!=v:
+                        ok=False;break
+                if not ok: continue
+            score = cosine(query_vector, p["vector"])
+            scored.append({"id":p["id"],"score":score,"payload":p.get("payload",{})})
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored[:top_k]
+
+class QdrantVectorStore(BaseVectorStore):
+    def __init__(self):
+        from qdrant_client import QdrantClient
+        from qdrant_client.http.models import Distance, PointStruct, VectorParams
+        self.client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+        self.dim = 384
+        self._PointStruct = PointStruct
+        self._Distance = Distance
+        self._VectorParams = VectorParams
+        self.fallback = MemoryVectorStore()
+
+    def _ensure_collection(self, name: str):
+        try:
+            cols = [c.name for c in self.client.get_collections().collections]
+            if name not in cols:
+                self.client.create_collection(collection_name=name, vectors_config=self._VectorParams(size=self.dim, distance=self._Distance.COSINE))
+        except Exception as e:
+            logger.warning(f"Qdrant ensure failed, fallback to memory: {e}")
+            raise
+
+    def embed_text(self, text: str) -> list[float]:
+        return self.fallback.embed_text(text)
+    def embed_image(self, image_path: str) -> list[float]:
+        return self.fallback.embed_image(image_path)
+
+    def upsert(self, collection: str, points: list[dict]):
+        if not points:
+            try:
+                self._ensure_collection(collection)
+            except:
+                pass
+            return
+        try:
+            self._ensure_collection(collection)
+            qpoints=[]
+            for p in points:
+                qpoints.append(self._PointStruct(id=str(p["id"]), vector=p["vector"], payload=p.get("payload",{})))
+            self.client.upsert(collection_name=collection, points=qpoints)
+        except Exception as e:
+            logger.warning(f"Qdrant upsert failed, using memory fallback: {e}")
+            self.fallback.upsert(collection, points)
+
+    def search(self, collection: str, query_vector: list[float], top_k: int=5, filter: dict | None=None) -> list[dict]:
+        try:
+            self._ensure_collection(collection)
+            res = self.client.search(collection_name=collection, query_vector=query_vector, limit=top_k)
+            return [{"id":r.id,"score":r.score,"payload":r.payload} for r in res]
+        except Exception as e:
+            logger.warning(f"Qdrant search fallback: {e}")
+            return self.fallback.search(collection, query_vector, top_k, filter)
+
+def get_vector_store() -> BaseVectorStore:
+    if settings.vector_db == "qdrant":
+        try:
+            return QdrantVectorStore()
+        except Exception:
+            return MemoryVectorStore()
+    elif settings.vector_db == "milvus":
+        return MemoryVectorStore()
+    else:
+        return MemoryVectorStore()
+
+_vector_store: BaseVectorStore | None = None
+def vector_store() -> BaseVectorStore:
+    global _vector_store
+    if _vector_store is None:
+        _vector_store = get_vector_store()
+    return _vector_store
+
+def ensure_collections():
+    vs = vector_store()
+    for coll in ["gosts_text","gallery_visual","checks_meta"]:
+        try:
+            if isinstance(vs, QdrantVectorStore):
+                vs._ensure_collection(coll)
+            else:
+                if coll not in vs.store:
+                    vs.store[coll]=[]
+        except Exception:
+            pass

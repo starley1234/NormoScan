@@ -1,0 +1,300 @@
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.orm import Session
+
+from ..config import settings
+from ..db import get_db
+from ..models.user import User
+from ..security import get_current_user
+
+router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+class SettingsIn(BaseModel):
+    vlm_model: str | None=None
+    vlm_quantization: str | None=None
+    vlm_engine: str | None=None
+    vlm_api_url: str | None=None
+    vlm_api_key: str | None=None
+    max_context_window: int | None=None
+    image_width: int | None=None
+    vram_limit_gb: int | None=None
+    empty_cache_after_page: bool | None=None
+    max_concurrent_vlm: int | None=None
+    ocr_engine: str | None=None
+    ocr_ensemble: bool | None=None
+
+@router.get("/settings")
+def get_settings(user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    # не отдаём ключ полностью, маскируем
+    api_key_masked = "***" + settings.vlm_api_key[-4:] if settings.vlm_api_key and len(settings.vlm_api_key)>4 else None
+    return {
+        "vlm_model": settings.vlm_model,
+        "vlm_quantization": settings.vlm_quantization,
+        "vlm_engine": settings.vlm_engine,
+        "vlm_api_url": settings.vlm_api_url,
+        "vlm_api_key_masked": api_key_masked,
+        "has_vlm_key": bool(settings.vlm_api_key),
+        "max_context_window": settings.max_context_window,
+        "image_width": settings.image_width,
+        "vram_limit_gb": settings.vram_limit_gb,
+        "empty_cache_after_page": settings.empty_cache_after_page,
+        "max_concurrent_vlm": settings.max_concurrent_vlm,
+        "vector_db": settings.vector_db,
+        "ocr_engine": settings.ocr_engine,
+        "ocr_ensemble": settings.ocr_ensemble,
+        "koseven_enabled": settings.koseven_enabled,
+        "enable_metrics": settings.enable_metrics,
+    }
+
+@router.post("/settings")
+def update_settings(inp: SettingsIn, user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    data = inp.model_dump(exclude_none=True) if hasattr(inp, "model_dump") else inp.dict(exclude_none=True)
+    for k,v in data.items():
+        if k=="max_context_window" and v>32768:
+            raise HTTPException(400, "max_context_window max 32768")
+        if k=="image_width" and not (512 <= v <= 800):
+            raise HTTPException(400, "image_width must be 512..800")
+        if k=="vlm_engine" and v not in ("transformers","vllm","openai","mock"):
+            raise HTTPException(400, "vlm_engine must be transformers/vllm/openai/mock")
+        # очистка URL от [] и пробелов (пользователь вставил [https://...](...))
+        if k=="vlm_api_url" and v:
+            v = v.strip().strip("[]()").split("](")[0].split("(")[0].strip()
+            # если вставили markdown ссылку [url](url) — берём первый url
+            import re
+            m=re.search(r"https?://[^\s\]\)]+", v)
+            if m: v=m.group(0)
+            data[k]=v
+        if k=="vlm_api_key" and v:
+            v=v.strip()
+            data[k]=v
+        setattr(settings, k, data[k] if k in ("vlm_api_url","vlm_api_key") else v)
+        # also hot-switch VLM if model changed
+        if k in ("vlm_model","vlm_quantization","vlm_engine","vlm_api_url","vlm_api_key"):
+            try:
+                from ..services.vlm import vlm_service
+                vlm_service.switch_model(settings.vlm_model, settings.vlm_quantization, settings.vlm_engine)
+                # если поменяли URL/ключ — сбросим флаг загрузки чтобы перечитал
+                if k in ("vlm_api_url","vlm_api_key"):
+                    vlm_service._loaded=False
+            except: pass
+    return {"status":"updated","settings": data}
+
+@router.post("/switch-model", summary="Быстрое переключение модели (16GB ↔ лёгкая)")
+def switch_model(model: str, quantization: str="mock", engine: str="mock", user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    from ..services.vlm import vlm_service
+    # Validate context
+    settings.vlm_model=model
+    settings.vlm_quantization=quantization
+    settings.vlm_engine=engine
+    res = vlm_service.switch_model(model, quantization, engine)
+    return {"status":"switched", **res}
+
+@router.get("/queue")
+def queue_info(user: User=Depends(get_current_user)):
+    if user.role not in ("admin","normocontroller"):
+        raise HTTPException(403, "Forbidden")
+    try:
+        from ..celery_app import celery_app
+        insp = celery_app.control.inspect()
+        active = insp.active() or {}
+        scheduled = insp.scheduled() or {}
+        reserved = insp.reserved() or {}
+        return {"active": active, "scheduled": scheduled, "reserved": reserved}
+    except Exception as e:
+        return {"active": {}, "note": f"Celery not available: {e}", "fallback":"sync mode"}
+
+@router.post("/queue/purge")
+def purge_queue(user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    try:
+        from ..celery_app import celery_app
+        celery_app.control.purge()
+        return {"status":"purged"}
+    except Exception as e:
+        return {"status":"no-op", "error": str(e)}
+
+@router.get("/dead-letters")
+def dead_letters(db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    from ..models.check import DeadLetter
+    items = db.query(DeadLetter).order_by(DeadLetter.created_at.desc()).limit(20).all()
+    return {"items": [{"id":d.id,"check_id":d.check_id,"filename":d.filename,"error":d.error,"retry_count":d.retry_count,"created_at":d.created_at} for d in items]}
+
+@router.get("/metrics", summary="Метрики (Prometheus json)")
+def metrics(user: User=Depends(get_current_user)):
+    if user.role not in ("admin","normocontroller"):
+        raise HTTPException(403, "Forbidden")
+    from ..core.metrics import metrics
+    return metrics.snapshot()
+
+@router.get("/users")
+def list_users(db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    users=db.query(User).all()
+    return {"users": [{"id":u.id,"username":u.username,"role":u.role,"is_active":u.is_active,"email":u.email} for u in users]}
+
+@router.post("/users/{user_id}/role")
+def change_role(user_id:int, role:str, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    target=db.query(User).filter(User.id==user_id).first()
+    if not target:
+        raise HTTPException(404,"Not found")
+    if role not in ("admin","normocontroller","engineer","viewer"):
+        raise HTTPException(400,"Invalid role")
+    target.role=role
+    db.commit()
+    return {"status":"ok","user_id":user_id,"role":role}
+
+# Metadata schemas CRUD
+class SchemaIn(BaseModel):
+    model_config = ConfigDict(protected_namespaces=(), populate_by_name=True)
+
+    name: str
+    title: str | None=None
+    schema_: dict[str,Any] = Field(validation_alias="schema_json", serialization_alias="schema_json")
+    make_active: bool=True
+
+@router.get("/schemas", summary="Список схем метаданных")
+def list_schemas(db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role not in ("admin","normocontroller"):
+        raise HTTPException(403, "Forbidden")
+    from ..services.metadata import list_schemas
+    items = list_schemas(db)
+    return {"schemas": [{"id":s.id,"name":s.name,"title":s.title,"is_active":s.is_active,"created_at":s.created_at, "schema": s.schema_json} for s in items]}
+
+@router.post("/schemas", summary="Создать/обновить схему")
+def upsert_schema(inp: SchemaIn, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    from ..services.metadata import create_or_update_schema
+    schema_data = inp.schema_
+    # Validate JSON schema basics
+    if "type" not in schema_data or "properties" not in schema_data:
+        raise HTTPException(400, "Invalid JSON schema")
+    s = create_or_update_schema(db, inp.name, schema_data, title=inp.title, make_active=inp.make_active, created_by=user.id)
+    return {"id": s.id, "name": s.name, "is_active": s.is_active}
+
+@router.post("/schemas/{schema_id}/activate")
+def activate_schema(schema_id:int, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    from ..models.app_settings import MetadataSchema
+    s = db.query(MetadataSchema).filter(MetadataSchema.id==schema_id).first()
+    if not s: raise HTTPException(404, "Not found")
+    for other in db.query(MetadataSchema).all():
+        other.is_active=False
+    s.is_active=True
+    db.commit()
+    return {"status":"activated","id":schema_id}
+
+# Retention & Backup
+@router.post("/retention/run", summary="Запустить retention (удалить PDF старше N дней, оставить JSON)")
+def run_retention(days: int=90, trash_days: int=30, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    from ..services.retention import run_retention as do_retention
+    res = do_retention(db, days=days, trash_days=trash_days)
+    return res
+
+@router.get("/trash", summary="Корзина (trashed checks)")
+def list_trash(db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role not in ("admin","normocontroller"):
+        raise HTTPException(403, "Forbidden")
+    from ..services.retention import list_trash
+    items = list_trash(db)
+    return {"items": [{"id":c.id,"filename":c.filename,"status":c.status,"created_at":c.created_at,"filepath":c.filepath} for c in items]}
+
+@router.post("/trash/{check_id}/restore", summary="Восстановить из корзины")
+def restore_trash(check_id: int, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    from ..services.retention import restore_check
+    c = restore_check(db, check_id)
+    if not c:
+        raise HTTPException(404, "Not found or not trashed")
+    return {"status":"restored","id":c.id}
+
+@router.post("/backup", summary="Бэкап в 1 клик (tar.gz)")
+def backup(db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    import os
+
+    from fastapi.responses import FileResponse
+
+    from ..services.retention import create_backup
+    path = create_backup(db)
+    if not os.path.exists(path):
+        raise HTTPException(500, "Backup failed")
+    return FileResponse(path, filename=os.path.basename(path), media_type="application/gzip")
+
+@router.get("/logs", summary="Логи приложения (из памяти + файл)")
+def get_logs(lines: int=200, level: str=None, db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role not in ("admin","normocontroller"):
+        raise HTTPException(403, "Forbidden")
+    from ..core.log_buffer import get_buffer
+    import os
+    buf = get_buffer()
+    if level:
+        buf = [b for b in buf if b["level"]==level.upper()]
+    # также читаем файл логов если есть
+    file_logs=[]
+    try:
+        log_path=os.path.join("storage","logs","app.log")
+        if os.path.exists(log_path):
+            with open(log_path,"r",encoding="utf-8",errors="ignore") as f:
+                file_logs=f.read().splitlines()[-lines:]
+    except: pass
+    return {"buffer": buf[-lines:], "file_tail": file_logs, "total_buffer": len(buf), "config": {"vlm_model": settings.vlm_model, "vlm_engine": settings.vlm_engine, "vlm_api_url": settings.vlm_api_url, "has_key": bool(settings.vlm_api_key)}}
+
+@router.post("/logs/clear", summary="Очистить буфер логов")
+def clear_logs(user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    from ..core.log_buffer import clear_buffer
+    clear_buffer()
+    return {"status":"cleared"}
+
+@router.post("/vlm/test", summary="Тест вызова внешнего VLM (для диагностики)")
+def test_vlm(prompt: str="Тест нормоконтроля: ответь OK", db: Session=Depends(get_db), user: User=Depends(get_current_user)):
+    if user.role!="admin":
+        raise HTTPException(403, "Only admin")
+    import tempfile, os, time
+    from PIL import Image
+    from ..services.vlm import vlm_service
+    # создаём тестовую картинку 1x1
+    tmp = tempfile.mktemp(suffix=".png")
+    Image.new("RGB",(64,64),color="white").save(tmp)
+    start=time.time()
+    # пробуем вызвать VLM через настроенный engine/api
+    try:
+        # форсируем engine openai/vllm если указан URL, иначе mock
+        orig_engine=vlm_service.engine
+        if settings.vlm_api_url and settings.vlm_engine=="mock":
+            vlm_service.engine="openai"
+        res = vlm_service.analyze_page(tmp, "Обозначение ТЕСТ Наименование Тест", text_hits=[], visual_hint=None, page_number=1, summary_prev="", ocr_confidence=0.9)
+        elapsed=round(time.time()-start,2)
+        # логи
+        from ..core.log_buffer import get_buffer
+        logs=get_buffer()[-20:]
+        # чистим tmp
+        try: os.remove(tmp)
+        except: pass
+        # восстановить engine
+        vlm_service.engine=orig_engine
+        return {"elapsed": elapsed, "result": res, "vlm_config": {"model": settings.vlm_model, "engine": settings.vlm_engine, "api_url": settings.vlm_api_url, "has_key": bool(settings.vlm_api_key)}, "logs": logs}
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc(), "vlm_config": {"model": settings.vlm_model, "engine": settings.vlm_engine, "api_url": settings.vlm_api_url}}

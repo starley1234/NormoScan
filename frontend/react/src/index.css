@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { font-family: 'Inter', system-ui, sans-serif; }
+.font-mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+
+/* Glassmorphism */
+.glass {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid #334155;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0f172a; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+/* Streaming fade-in */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
+.stream-token { animation: fadeIn 0.15s ease-out; }
+
+/* Glowing input */
+.glow-focus:focus { box-shadow: 0 0 0 1px #3b82f6, 0 0 20px rgba(59,130,246,0.15); border-color: #3b82f6 !important; }
+
+/* Markdown */
+.markdown table { @apply w-full border-collapse my-4 text-sm; }
+.markdown th, .markdown td { @apply border border-slate-700 px-3 py-2; }
+.markdown th { @apply bg-slate-800 font-semibold; }
+.markdown pre { @apply bg-[#0a0a0a] border border-slate-700 rounded-lg p-4 my-3 overflow-x-auto; }
+.markdown code { @apply font-mono text-sm; }
+.markdown code:not(pre code) { @apply bg-slate-800 px-1.5 py-0.5 rounded text-blue-300; }
