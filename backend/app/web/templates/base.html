@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}НормоСкан{% endblock %}</title>
+    <link rel="stylesheet" href="/web/static/css/app.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📐</text></svg>">
+</head>
+<body>
+    <div class="app">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h1>📐 НормоСкан</h1>
+                <span class="version">v1.2</span>
+            </div>
+            
+            <nav class="nav">
+                <a href="/web/" class="nav-item {% if active_page == 'dashboard' %}active{% endif %}">
+                    <span class="icon">📊</span> Дашборд
+                </a>
+                <a href="/web/checks" class="nav-item {% if active_page == 'checks' %}active{% endif %}">
+                    <span class="icon">📋</span> Проверки
+                </a>
+                <a href="/web/upload" class="nav-item {% if active_page == 'upload' %}active{% endif %}">
+                    <span class="icon">📤</span> Загрузка
+                </a>
+                <a href="/web/gosts" class="nav-item {% if active_page == 'gosts' %}active{% endif %}">
+                    <span class="icon">📚</span> ГОСТы
+                </a>
+                <a href="/web/gallery" class="nav-item {% if active_page == 'gallery' %}active{% endif %}">
+                    <span class="icon">🖼️</span> Галерея
+                </a>
+                <a href="/web/analytics" class="nav-item {% if active_page == 'analytics' %}active{% endif %}">
+                    <span class="icon">📈</span> Аналитика
+                </a>
+                <a href="/web/team" class="nav-item {% if active_page == 'team' %}active{% endif %}">
+                    <span class="icon">👥</span> Команда
+                </a>
+                <a href="/web/admin" class="nav-item {% if active_page == 'admin' %}active{% endif %}">
+                    <span class="icon">⚙️</span> Админка
+                </a>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <span class="username">{{ username }}</span>
+                    <span class="role">{{ role }}</span>
+                </div>
+                <button class="btn btn-ghost btn-sm" onclick="logout()">Выйти</button>
+            </div>
+        </aside>
+        
+        <main class="main">
+            <header class="topbar">
+                <button class="btn btn-ghost btn-icon menu-toggle" onclick="toggleSidebar()">☰</button>
+                <div class="topbar-title">{% block header %}{% endblock %}</div>
+                <div class="topbar-actions">
+                    <span class="status-indicator {% if healthy %}ok{% else %}{% endif %}" id="health-status" title="Статус API"></span>
+                </div>
+            </header>
+            
+            <div class="content">
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+    </div>
+    
+    <div id="toast-container" class="toast-container"></div>
+    
+    <script src="/web/static/js/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

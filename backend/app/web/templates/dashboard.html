@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Дашборд — НормоСкан{% endblock %}
+{% block header %}Дашборд{% endblock %}
+
+{% block content %}
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ total }}</div>
+        <div class="stat-label">Всего проверок</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value text-success">{{ done }}</div>
+        <div class="stat-label">Завершено</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value text-warning">{{ pending }}</div>
+        <div class="stat-label">На проверке</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ "%.0f"|format(hit_rate * 100) }}%</div>
+        <div class="stat-label">Hit Rate</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Последние проверки</span>
+        <a href="/web/checks" class="btn btn-sm btn-secondary">Все →</a>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Файл</th>
+                    <th>Статус</th>
+                    <th>Страницы</th>
+                    <th>Дата</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in last_checks %}
+                <tr>
+                    <td><a href="/web/checks/{{ c.id }}">#{{ c.id }}</a></td>
+                    <td>{{ c.filename }}</td>
+                    <td>{{ statusBadge(c.status) | safe }}</td>
+                    <td>{{ c.pages_done }}/{{ c.pages_total }}</td>
+                    <td class="text-muted">{{ formatDate(c.created_at.isoformat()) }}</td>
+                </tr>
+                {% endfor %}
+                {% if not last_checks %}
+                <tr><td colspan="5" class="text-muted">Нет проверок</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if top_errors %}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Топ ошибок (7 дней)</span>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead><tr><th>Код ГОСТ</th><th>Количество</th></tr></thead>
+            <tbody>
+                {% for e in top_errors %}
+                <tr>
+                    <td><span class="error-code">{{ e.code }}</span></td>
+                    <td>{{ e.count }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if last_run %}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Active Learning</span>
+    </div>
+    <p>Последний цикл: <strong>{{ "%.1f"|format(last_run.before_hit_rate * 100) }}%</strong> → <strong class="text-success">{{ "%.1f"|format(last_run.after_hit_rate * 100) }}%</strong></p>
+    <p class="text-muted">Запущен: {{ formatDate(last_run.created_at.isoformat()) }}</p>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Проверка #{{ check.id }} — НормоСкан{% endblock %}
+{% block header %}Проверка #{{ check.id }}{% endblock %}
+
+{% block content %}
+<div class="flex items-center gap-3 mb-3">
+    {{ statusBadge(check.status) | safe }}
+    <span class="text-muted">{{ check.filename }}</span>
+    <span class="text-muted">•</span>
+    <span class="text-muted">{{ check.pages_done }}/{{ check.pages_total }} стр.</span>
+    <a href="/web/checks" class="btn btn-sm btn-ghost ml-auto">← Назад</a>
+</div>
+
+{% if check.summary %}
+<div class="card">
+    <div class="card-header"><span class="card-title">Сводка</span></div>
+    <p>{{ check.summary }}</p>
+</div>
+{% endif %}
+
+{% if check.meta_json %}
+<div class="card">
+    <div class="card-header"><span class="card-title">Метаданные (штамп)</span></div>
+    <div class="json-viewer">{{ check.meta_json | tojson(indent=2) }}</div>
+</div>
+{% endif %}
+
+{% if check.checklist_json and check.checklist_json.get('items') %}
+<div class="card">
+    <div class="card-header"><span class="card-title">Чек-лист ГОСТ</span></div>
+    <div class="table-container">
+        <table>
+            <thead><tr><th>Код</th><th>Описание</th><th>Статус</th></tr></thead>
+            <tbody>
+                {% for item in check.checklist_json['items'] %}
+                <tr>
+                    <td><span class="error-code">{{ item.code }}</span></td>
+                    <td>{{ item.desc }}</td>
+                    <td>
+                        {% if item.status == 'fail' %}
+                        <span class="badge badge-error">❌ {{ item.count }}</span>
+                        {% else %}
+                        <span class="badge badge-success">✓</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if check.errors_json %}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Замечания ({{ check.errors_json | length }})</span>
+    </div>
+    {% for err in check.errors_json %}
+    <div class="error-item">
+        <div class="error-header">
+            <span class="error-code">{{ err.get('code', 'N/A') }}</span>
+            <span class="badge badge-{{ err.get('severity', 'info') }}">{{ err.get('severity') }}</span>
+        </div>
+        <div class="error-msg">{{ err.get('msg', '') }}</div>
+        {% if err.get('suggested_fix') %}
+        <div class="error-fix">💡 {{ err['suggested_fix'] }}</div>
+        {% endif %}
+        <div class="error-actions">
+            <button class="btn btn-sm btn-secondary" onclick="sendFeedback('{{ check.id }}', '{{ err.get('id', '') }}', 'like')">👍</button>
+            <button class="btn btn-sm btn-secondary" onclick="sendFeedback('{{ check.id }}', '{{ err.get('id', '') }}', 'dislike')">👎</button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if check.consistency_json and check.consistency_json.get('issues') %}
+<div class="card">
+    <div class="card-header"><span class="card-title">Несоответствия между листами</span></div>
+    {% for iss in check.consistency_json['issues'] %}
+    <div class="error-item">
+        <div class="error-msg">{{ iss.msg }}</div>
+        {% if iss.get('suggested_fix') %}
+        <div class="error-fix">💡 {{ iss.suggested_fix }}</div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if pages %}
+<div class="card">
+    <div class="card-header"><span class="card-title">Страницы</span></div>
+    <div class="table-container">
+        <table>
+            <thead><tr><th>Страница</th><th>Статус</th><th>OCR</th><th>Ошибки</th></tr></thead>
+            <tbody>
+                {% for p in pages %}
+                <tr>
+                    <td>{{ p.page_number }}</td>
+                    <td>{{ statusBadge(p.status) | safe }}</td>
+                    <td>{{ "%.0f"|format((p.ocr_confidence or 0) * 100) }}%</td>
+                    <td>{{ (p.errors or []) | length }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function sendFeedback(checkId, errorId, vote) {
+    try {
+        await authApi.post('/checks/feedback', { check_id: checkId, error_id: errorId, vote });
+        toast('Спасибо за отзыв!', 'success');
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+</script>
+{% endblock %}

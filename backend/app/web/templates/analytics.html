@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Аналитика — НормоСкан{% endblock %}
+{% block header %}Аналитика и отчёты{% endblock %}
+
+{% block content %}
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ summary.total_checks }}</div>
+        <div class="stat-label">Проверок за период</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value text-error">{{ summary.top_errors | length }}</div>
+        <div class="stat-label">Типов ошибок</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ summary.period }}</div>
+        <div class="stat-label">Период</div>
+    </div>
+</div>
+
+{% if report and report.summary %}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">📝 LLM отчёт</span>
+    </div>
+    <p>{{ report.summary }}</p>
+    {% if report.recommendations %}
+    <div class="mt-3">
+        <strong>Рекомендации:</strong>
+        <ul style="margin-top: 8px; padding-left: 20px;">
+            {% for rec in report.recommendations %}
+            <li class="text-success">{{ rec }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if summary.top_errors %}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Топ ошибок</span>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead><tr><th>Код ГОСТ</th><th>Количество</th></tr></thead>
+            <tbody>
+                {% for e in summary.top_errors %}
+                <tr>
+                    <td><span class="error-code">{{ e.code }}</span></td>
+                    <td>{{ e.count }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% if summary.by_day %}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Динамика по дням</span>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead><tr><th>Дата</th><th>Количество</th></tr></thead>
+            <tbody>
+                {% for day, count in summary.by_day | dictsort %}
+                <tr>
+                    <td>{{ day }}</td>
+                    <td>{{ count }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

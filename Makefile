@@ -1,4 +1,4 @@
-.PHONY: up down logs backend frontend test ingest
+.PHONY: up down logs backend worker test ingest quantize
 
 up:
 	docker compose up --build
@@ -15,9 +15,6 @@ backend:
 worker:
 	celery -A backend.app.celery_app worker --loglevel=INFO -Q high,normoscan,low --concurrency=1
 
-frontend:
-	streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0
-
 test:
 	pytest -q
 
@@ -26,3 +23,6 @@ ingest:
 
 quantize:
 	python scripts/quantize_model.py --model google/gemma-3-12b-it --quant awq-4bit
+
+web:
+	@echo "Web UI available at http://localhost:8000/web/"

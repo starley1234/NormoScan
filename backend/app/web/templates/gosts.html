@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}ГОСТы — НормоСкан{% endblock %}
+{% block header %}База ГОСТов{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Индексация</span>
+    </div>
+    <div class="form-row">
+        <div class="form-group">
+            <label class="form-label">Путь к папке</label>
+            <input type="text" class="form-input" id="gost-path" value="./storage/gosts">
+        </div>
+        <div class="form-group">
+            <label class="form-label">&nbsp;</label>
+            <button class="btn btn-secondary" onclick="ingestGosts()">Индексировать</button>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Поиск по ГОСТам</span>
+    </div>
+    <div class="form-row">
+        <div class="form-group">
+            <input type="text" class="form-input" id="gost-query" placeholder="Например: основная надпись ГОСТ 2.104">
+        </div>
+        <div class="form-group">
+            <button class="btn btn-primary" onclick="searchGosts()">Искать</button>
+        </div>
+    </div>
+    <div id="gost-results"></div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Индексированные ГОСТы ({{ gosts | length }})</span>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Обозначение</th>
+                    <th>Статус</th>
+                    <th>Версия</th>
+                    <th>Обновлён</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for g in gosts %}
+                <tr>
+                    <td><span class="error-code">{{ g.designation }}</span></td>
+                    <td>{{ statusBadge(g.status) | safe }}</td>
+                    <td>{{ g.version or '—' }}</td>
+                    <td class="text-muted">{{ formatDate(g.updated_at.isoformat()) }}</td>
+                </tr>
+                {% endfor %}
+                {% if not gosts %}
+                <tr><td colspan="4" class="text-muted">Нет индексированных ГОСТов</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function ingestGosts() {
+    const path = document.getElementById('gost-path').value;
+    try {
+        const result = await authApi.post('/gosts/ingest', { path });
+        toast(`Проиндексировано: ${result.indexed}, пропущено: ${result.skipped}`, 'success');
+        setTimeout(() => location.reload(), 1500);
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+async function searchGosts() {
+    const query = document.getElementById('gost-query').value;
+    if (!query.trim()) return;
+    
+    try {
+        const result = await authApi.post('/gosts/search', { query, top_k: 5 });
+        const container = document.getElementById('gost-results');
+        
+        if (!result.hits || result.hits.length === 0) {
+            container.innerHTML = '<p class="text-muted mt-2">Ничего не найдено</p>';
+            return;
+        }
+        
+        let html = '<div class="mt-2">';
+        for (const hit of result.hits) {
+            html += `
+                <div class="error-item">
+                    <div class="error-header">
+                        <span class="error-code">${hit.payload.designation}</span>
+                        <span class="badge badge-info">${hit.score.toFixed(2)}</span>
+                    </div>
+                    <div class="text-muted" style="font-size: 12px;">${hit.snippet.substring(0, 300)}...</div>
+                </div>
+            `;
+        }
+        html += '</div>';
+        container.innerHTML = html;
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+</script>
+{% endblock %}

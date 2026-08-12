@@ -16,8 +16,20 @@ jobs:
           python -m venv .venv
           .venv/bin/pip install --upgrade pip
           .venv/bin/pip install -r backend/requirements.txt
-          .venv/bin/pip install pytest httpx
-      - name: Unit & RAG & VLM
-        run: .venv/bin/pytest tests/unit tests/rag tests/vlm -q
-      - name: Integration (TestContainers)
+          .venv/bin/pip install pytest httpx Pillow
+      - name: Unit tests
+        run: .venv/bin/pytest tests/unit -q
+      - name: RAG tests
+        run: .venv/bin/pytest tests/rag -q
+      - name: VLM tests
+        run: .venv/bin/pytest tests/vlm -q
+      - name: Web UI tests
+        run: .venv/bin/pytest tests/web -q
+      - name: MCP tests
+        run: .venv/bin/pytest tests/mcp -q
+      - name: Security tests
+        run: .venv/bin/pytest tests/security -q
+      - name: Task tests
+        run: .venv/bin/pytest tests/tasks -q
+      - name: Integration tests
         run: .venv/bin/pytest tests/integration -q

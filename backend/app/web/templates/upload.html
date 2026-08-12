@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Загрузка — НормоСкан{% endblock %}
+{% block header %}Загрузка чертежа{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Загрузить PDF на проверку</span>
+    </div>
+    
+    <div class="upload-zone" id="upload-zone">
+        <div class="upload-zone-icon">📄</div>
+        <div class="upload-zone-text">
+            Перетащите PDF сюда или нажмите для выбора
+        </div>
+        <input type="file" id="file-input" accept=".pdf" style="display: none;">
+    </div>
+    
+    <div class="form-row mt-3">
+        <div class="form-group">
+            <label class="form-label">Приоритет</label>
+            <select class="form-select" id="priority">
+                <option value="1">Высокий (1)</option>
+                <option value="3">Высокий (3)</option>
+                <option value="5" selected>Обычный (5)</option>
+                <option value="8">Низкий (8)</option>
+                <option value="10">Низкий (10)</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Файл</label>
+            <div id="file-name" class="text-muted">Не выбран</div>
+        </div>
+    </div>
+    
+    <div id="progress-section" class="hidden mt-3">
+        <div class="flex items-center gap-2">
+            <div class="progress flex-1">
+                <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
+            </div>
+            <span id="progress-text" class="text-muted">0%</span>
+        </div>
+    </div>
+    
+    <div id="status-section" class="hidden mt-3">
+        <div class="flex items-center gap-2">
+            <span id="status-text">Обработка...</span>
+            <div class="progress flex-1">
+                <div class="progress-bar" id="status-progress" style="width: 0%"></div>
+            </div>
+        </div>
+    </div>
+    
+    <button class="btn btn-primary mt-3" id="upload-btn" disabled onclick="startUpload()">
+        Загрузить
+    </button>
+</div>
+
+<div class="card">
+    <div class="card-header"><span class="card-title">Подсказки</span></div>
+    <ul style="font-size: 13px; color: var(--text-secondary); padding-left: 20px;">
+        <li>Поддерживаются PDF форматов А0-А4</li>
+        <li>Файл автоматически разбивается на страницы и зоны (штамп, техтребования, графика)</li>
+        <li>Дедупликация по хэшу: повторная загрузка того же файла в течение 5 минут вернёт готовый результат</li>
+        <li>Максимальный размер файла: 100 МБ</li>
+    </ul>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const uploadZone = document.getElementById('upload-zone');
+const fileInput = document.getElementById('file-input');
+const fileName = document.getElementById('file-name');
+const uploadBtn = document.getElementById('upload-btn');
+const progressSection = document.getElementById('progress-section');
+const progressBar = document.getElementById('progress-bar');
+const progressText = document.getElementById('progress-text');
+const statusSection = document.getElementById('status-section');
+const statusProgress = document.getElementById('status-progress');
+const statusText = document.getElementById('status-text');
+
+let selectedFile = null;
+
+uploadZone.addEventListener('click', () => fileInput.click());
+
+uploadZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    uploadZone.classList.add('dragover');
+});
+
+uploadZone.addEventListener('dragleave', () => {
+    uploadZone.classList.remove('dragover');
+});
+
+uploadZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) {
+        handleFile(e.dataTransfer.files[0]);
+    }
+});
+
+fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length) {
+        handleFile(e.target.files[0]);
+    }
+});
+
+function handleFile(file) {
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+        toast('Только PDF файлы', 'error');
+        return;
+    }
+    if (file.size > 100 * 1024 * 1024) {
+        toast('Файл слишком большой (макс. 100 МБ)', 'error');
+        return;
+    }
+    selectedFile = file;
+    fileName.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
+    uploadBtn.disabled = false;
+}
+
+async function startUpload() {
+    if (!selectedFile) return;
+    
+    uploadBtn.disabled = true;
+    progressSection.classList.remove('hidden');
+    
+    const priority = document.getElementById('priority').value;
+    
+    try {
+        const result = await uploadFile(selectedFile, priority, (pct) => {
+            progressBar.style.width = pct + '%';
+            progressText.textContent = pct + '%';
+        });
+        
+        if (result.status === 'dedupe') {
+            toast('Найден дубликат! Перенаправляю...', 'success');
+            setTimeout(() => window.location.href = `/web/checks/${result.dedupe_from}`, 1000);
+            return;
+        }
+        
+        toast('Файл загружен, начинаю обработку...', 'success');
+        
+        statusSection.classList.remove('hidden');
+        
+        // Poll for completion
+        const finalResult = await pollUntilDone(result.check_id, 1500);
+        
+        if (finalResult.status === 'done') {
+            toast('Проверка завершена!', 'success');
+            setTimeout(() => window.location.href = `/web/checks/${result.check_id}`, 500);
+        } else {
+            toast('Ошибка обработки: ' + (finalResult.summary || finalResult.status), 'error');
+        }
+        
+    } catch (err) {
+        toast(err.message, 'error');
+        uploadBtn.disabled = false;
+    }
+}
+</script>
+{% endblock %}

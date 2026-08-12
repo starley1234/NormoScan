@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Галерея — НормоСкан{% endblock %}
+{% block header %}Галерея ошибок и эталонов{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Добавить пример</span>
+    </div>
+    <div class="form-row">
+        <div class="form-group">
+            <label class="form-label">Изображение</label>
+            <input type="file" class="form-input" id="gallery-file" accept="image/*">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Название</label>
+            <input type="text" class="form-input" id="gallery-title" placeholder="Неверная засечка стрелки">
+        </div>
+    </div>
+    <div class="form-row">
+        <div class="form-group">
+            <label class="form-label">Категория</label>
+            <select class="form-select" id="gallery-category">
+                <option value="error">Ошибка</option>
+                <option value="etalon">Эталон</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">ГОСТ</label>
+            <input type="text" class="form-input" id="gallery-gost" placeholder="ГОСТ 2.305">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Тип ошибки</label>
+            <input type="text" class="form-input" id="gallery-type" placeholder="засечка">
+        </div>
+    </div>
+    <button class="btn btn-primary" onclick="uploadGallery()">Добавить</button>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Поиск похожих</span>
+    </div>
+    <div class="form-row">
+        <div class="form-group">
+            <input type="file" class="form-input" id="search-file" accept="image/*">
+        </div>
+        <div class="form-group">
+            <button class="btn btn-secondary" onclick="searchGallery()">Найти</button>
+        </div>
+    </div>
+    <div id="search-results"></div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Элементы ({{ items | length }})</span>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Название</th>
+                    <th>Категория</th>
+                    <th>ГОСТ</th>
+                    <th>Тип</th>
+                    <th>Добавлен</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td>{{ item.title }}</td>
+                    <td><span class="badge badge-{{ 'error' if item.category == 'error' else 'info' }}">{{ item.category }}</span></td>
+                    <td>{{ item.gost_ref or '—' }}</td>
+                    <td>{{ item.error_type or '—' }}</td>
+                    <td class="text-muted">{{ formatDate(item.created_at.isoformat()) }}</td>
+                </tr>
+                {% endfor %}
+                {% if not items %}
+                <tr><td colspan="5" class="text-muted">Галерея пуста</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function uploadGallery() {
+    const fileInput = document.getElementById('gallery-file');
+    if (!fileInput.files.length) {
+        toast('Выберите изображение', 'error');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+    formData.append('title', document.getElementById('gallery-title').value);
+    formData.append('category', document.getElementById('gallery-category').value);
+    formData.append('gost_ref', document.getElementById('gallery-gost').value);
+    formData.append('error_type', document.getElementById('gallery-type').value);
+    
+    try {
+        const result = await authApi.postForm('/gallery/upload', formData);
+        toast('Добавлено в галерею', 'success');
+        setTimeout(() => location.reload(), 1000);
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+async function searchGallery() {
+    const fileInput = document.getElementById('search-file');
+    if (!fileInput.files.length) {
+        toast('Выберите изображение для поиска', 'error');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+    
+    try {
+        const result = await authApi.postForm('/gallery/search', formData);
+        const container = document.getElementById('search-results');
+        
+        if (!result.hits || result.hits.length === 0) {
+            container.innerHTML = '<p class="text-muted mt-2">Ничего не найдено</p>';
+            return;
+        }
+        
+        let html = '<div class="mt-2">';
+        for (const hit of result.hits) {
+            html += `
+                <div class="error-item">
+                    <div class="error-header">
+                        <span class="error-code">${hit.payload.title}</span>
+                        <span class="badge badge-success">${hit.similarity_percent}%</span>
+                    </div>
+                    <div class="text-muted" style="font-size: 12px;">${hit.payload.gost_ref || ''} ${hit.payload.error_type || ''}</div>
+                </div>
+            `;
+        }
+        html += '</div>';
+        container.innerHTML = html;
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+</script>
+{% endblock %}

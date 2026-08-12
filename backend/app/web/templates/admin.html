@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}Админка — НормоСкан{% endblock %}
+{% block header %}Администрирование{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Настройки VLM</span>
+    </div>
+    <div class="form-row">
+        <div class="form-group">
+            <label class="form-label">Модель</label>
+            <input type="text" class="form-input" id="vlm-model" value="{{ config.vlm_model }}">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Квантование</label>
+            <select class="form-select" id="vlm-quant">
+                <option value="mock" {% if config.vlm_quantization == 'mock' %}selected{% endif %}>Mock</option>
+                <option value="awq-4bit" {% if config.vlm_quantization == 'awq-4bit' %}selected{% endif %}>AWQ 4-bit</option>
+                <option value="gptq-4bit" {% if config.vlm_quantization == 'gptq-4bit' %}selected{% endif %}>GPTQ 4-bit</option>
+                <option value="int8" {% if config.vlm_quantization == 'int8' %}selected{% endif %}>INT8</option>
+                <option value="fp16" {% if config.vlm_quantization == 'fp16' %}selected{% endif %}>FP16</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Движок</label>
+            <select class="form-select" id="vlm-engine">
+                <option value="mock" {% if config.vlm_engine == 'mock' %}selected{% endif %}>Mock</option>
+                <option value="transformers" {% if config.vlm_engine == 'transformers' %}selected{% endif %}>Transformers</option>
+                <option value="vllm" {% if config.vlm_engine == 'vllm' %}selected{% endif %}>vLLM</option>
+                <option value="openai" {% if config.vlm_engine == 'openai' %}selected{% endif %}>OpenAI API</option>
+            </select>
+        </div>
+    </div>
+    <div class="form-row">
+        <div class="form-group">
+            <label class="form-label">Контекстное окно</label>
+            <input type="number" class="form-input" id="vlm-ctx" value="{{ config.max_context_window }}" min="2048" max="32768" step="1024">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Ширина изображения</label>
+            <input type="number" class="form-input" id="vlm-width" value="{{ config.image_width }}" min="512" max="800">
+        </div>
+        <div class="form-group">
+            <label class="form-label">OCR Engine</label>
+            <select class="form-select" id="ocr-engine">
+                <option value="mock" {% if config.ocr_engine == 'mock' %}selected{% endif %}>Mock</option>
+                <option value="easyocr" {% if config.ocr_engine == 'easyocr' %}selected{% endif %}>EasyOCR</option>
+                <option value="paddleocr" {% if config.ocr_engine == 'paddleocr' %}selected{% endif %}>PaddleOCR</option>
+            </select>
+        </div>
+    </div>
+    <button class="btn btn-primary" onclick="saveSettings()">Сохранить</button>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Очередь задач</span>
+    </div>
+    <div id="queue-info">
+        <button class="btn btn-secondary btn-sm" onclick="refreshQueue()">Обновить</button>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">Система</span>
+    </div>
+    <div class="flex gap-2">
+        <button class="btn btn-secondary" onclick="runRetention()">🧹 Retention</button>
+        <button class="btn btn-secondary" onclick="createBackup()">📦 Бэкап</button>
+        <button class="btn btn-secondary" onclick="runActiveLearning()">🔄 Active Learning</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function saveSettings() {
+    const settings = {
+        vlm_model: document.getElementById('vlm-model').value,
+        vlm_quantization: document.getElementById('vlm-quant').value,
+        vlm_engine: document.getElementById('vlm-engine').value,
+        max_context_window: parseInt(document.getElementById('vlm-ctx').value),
+        image_width: parseInt(document.getElementById('vlm-width').value),
+        ocr_engine: document.getElementById('ocr-engine').value
+    };
+    
+    try {
+        await authApi.post('/admin/settings', settings);
+        toast('Настройки сохранены', 'success');
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+async function refreshQueue() {
+    try {
+        const result = await authApi.get('/admin/queue');
+        const container = document.getElementById('queue-info');
+        container.innerHTML = `<pre class="json-viewer mt-2">${JSON.stringify(result, null, 2)}</pre>`;
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+async function runRetention() {
+    try {
+        const result = await authApi.post('/admin/retention/run', {});
+        toast(`Retention: перемещено ${result.moved_to_trash}, очищено ${result.purged}`, 'success');
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+async function createBackup() {
+    try {
+        const resp = await fetch('/api/admin/backup', { headers: getAuthHeaders() });
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'normoscan_backup.tar.gz';
+        a.click();
+        toast('Бэкап создан', 'success');
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+async function runActiveLearning() {
+    try {
+        const result = await authApi.post('/dashboard/active-learning/run', {});
+        toast(`Active Learning: ${result.before_hit_rate} → ${result.after_hit_rate}`, 'success');
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+</script>
+{% endblock %}

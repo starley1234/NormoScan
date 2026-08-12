@@ -1,4 +1,8 @@
+"""
+NormoScan configuration.
+"""
 import os
+import secrets
 from functools import lru_cache
 from typing import Literal
 
@@ -8,7 +12,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     app_env: str = Field(default="development", validation_alias="APP_ENV")
-    secret_key: str = Field(default="change-me", validation_alias="SECRET_KEY")
+    secret_key: str = Field(default="", validation_alias="SECRET_KEY")
     api_host: str = Field(default="0.0.0.0", validation_alias="API_HOST")
     api_port: int = Field(default=8000, validation_alias="API_PORT")
 
@@ -17,14 +21,14 @@ class Settings(BaseSettings):
     celery_broker_url: str = Field(default="redis://localhost:6379/1", validation_alias="CELERY_BROKER_URL")
     celery_result_backend: str = Field(default="redis://localhost:6379/2", validation_alias="CELERY_RESULT_BACKEND")
 
-    vector_db: Literal["qdrant","milvus","memory"] = Field(default="memory", validation_alias="VECTOR_DB")
+    vector_db: Literal["qdrant", "milvus", "memory"] = Field(default="memory", validation_alias="VECTOR_DB")
     qdrant_url: str = Field(default="http://localhost:6333", validation_alias="QDRANT_URL")
     qdrant_api_key: str | None = Field(default=None, validation_alias="QDRANT_API_KEY")
     milvus_uri: str = Field(default="http://localhost:19530", validation_alias="MILVUS_URI")
 
     vlm_model: str = Field(default="google/gemma-3-12b-it", validation_alias="VLM_MODEL")
-    vlm_quantization: Literal["awq-4bit","gptq-4bit","int8","fp16","mock"] = Field(default="mock", validation_alias="VLM_QUANTIZATION")
-    vlm_engine: Literal["transformers","vllm","mock","openai"] = Field(default="mock", validation_alias="VLM_ENGINE")
+    vlm_quantization: Literal["awq-4bit", "gptq-4bit", "int8", "fp16", "mock"] = Field(default="mock", validation_alias="VLM_QUANTIZATION")
+    vlm_engine: Literal["transformers", "vllm", "mock", "openai"] = Field(default="mock", validation_alias="VLM_ENGINE")
     vlm_device: str = Field(default="cuda", validation_alias="VLM_DEVICE")
     vlm_api_url: str | None = Field(default=None, validation_alias="VLM_API_URL")
     vlm_api_key: str | None = Field(default=None, validation_alias="VLM_API_KEY")
@@ -34,7 +38,7 @@ class Settings(BaseSettings):
     empty_cache_after_page: bool = Field(default=True, validation_alias="EMPTY_CACHE_AFTER_PAGE")
     max_concurrent_vlm: int = Field(default=1, validation_alias="MAX_CONCURRENT_VLM")
 
-    ocr_engine: Literal["easyocr","paddleocr","mock"] = Field(default="mock", validation_alias="OCR_ENGINE")
+    ocr_engine: Literal["easyocr", "paddleocr", "mock"] = Field(default="mock", validation_alias="OCR_ENGINE")
     ocr_ensemble: bool = Field(default=True, validation_alias="OCR_ENSEMBLE")
     ocr_fallback_threshold: float = Field(default=0.7, validation_alias="OCR_FALLBACK_THRESHOLD")
 
@@ -58,32 +62,42 @@ class Settings(BaseSettings):
     queue_max_retries: int = Field(default=3, validation_alias="QUEUE_MAX_RETRIES")
     enable_sse: bool = Field(default=True, validation_alias="ENABLE_SSE")
 
+    # Security
+    max_upload_size_mb: int = Field(default=100, validation_alias="MAX_UPLOAD_SIZE_MB")
+    rate_limit_requests: int = Field(default=100, validation_alias="RATE_LIMIT_REQUESTS")
+    rate_limit_window: int = Field(default=60, validation_alias="RATE_LIMIT_WINDOW")
+
+    @field_validator("secret_key", mode="before")
+    @classmethod
+    def _validate_secret(cls, v):
+        """Generate secret key if not provided."""
+        if not v or v == "change-me":
+            return secrets.token_hex(32)
+        return v
+
     @field_validator("vlm_api_url", mode="before")
     @classmethod
     def _clean_vlm_url(cls, v):
+        """Clean VLM URL from markdown artifacts."""
         if not v or not isinstance(v, str):
             return None
         v = v.strip()
         if not v or v in ("", "null", "None"):
             return None
-        # убери markdown [url](url) и скобки
-        # берём последний https://
+        # Extract URL from markdown [text](url) or bare URL
         import re
-        # если markdown вида [text](url) — вытаскиваем url из скобок
-        # ищем все URL
         urls = re.findall(r"https?://[^\s\]\)\"']+", v)
         if urls:
             return urls[-1].strip().rstrip(".,)")
-        # иначе просто чистим скобки
         return v.strip().strip("[]()").strip()
 
     @field_validator("vlm_model", mode="before")
     @classmethod
     def _clean_vlm_model(cls, v):
+        """Remove openai/vllm prefix from model name."""
         if not v or not isinstance(v, str):
             return v
         v = v.strip()
-        # убери префикс openai/ / vllm/ — LM Studio хочет чистое имя
         for p in ("openai/", "vllm/", "openai:", "vllm:"):
             if v.startswith(p):
                 v = v[len(p):]
@@ -92,6 +106,7 @@ class Settings(BaseSettings):
     @field_validator("vlm_api_key", mode="before")
     @classmethod
     def _clean_key(cls, v):
+        """Clean API key."""
         if not v or not isinstance(v, str):
             return None
         v = v.strip()
@@ -109,16 +124,26 @@ class Settings(BaseSettings):
         return self.database_url.startswith("sqlite")
 
     def effective_vector_db(self) -> str:
-        if self.app_env == "development" and self.vector_db in ("qdrant","milvus"):
+        if self.app_env == "development" and self.vector_db in ("qdrant", "milvus"):
             return self.vector_db
         return self.vector_db
+
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
 
+
 settings = get_settings()
 
 # Ensure storage dirs
-for p in [settings.storage_path, settings.gosts_path, settings.gallery_path, os.path.join(settings.storage_path, "uploads"), os.path.join(settings.storage_path, "checks"), os.path.join(settings.storage_path, "retrain")]:
+for p in [
+    settings.storage_path,
+    settings.gosts_path,
+    settings.gallery_path,
+    os.path.join(settings.storage_path, "uploads"),
+    os.path.join(settings.storage_path, "checks"),
+    os.path.join(settings.storage_path, "retrain"),
+    os.path.join(settings.storage_path, "logs"),
+]:
     os.makedirs(p, exist_ok=True)
